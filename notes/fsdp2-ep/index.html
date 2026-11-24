@@ -188,27 +188,15 @@ ul,ol { margin: 3px 0 0; padding-left: 1.45em; }
   .stage { --side: 1fr; --center: .88fr; }
   .stage.compute { --side: .83fr; --center: 1.35fr; }
   .stage.combine { --side: 1fr; --center: 1.25fr; }
-  .combine-mid { grid-template-columns: 1fr; }
-}
-@media(max-width:740px) {
-  .intro, .stage-grid, .stage.with-connector .stage-grid { grid-template-columns: 1fr; }
-  .connector, .compute .connector { justify-self: center; width: 25px; margin: 4px 0; }
-  .compute .connector { transform: rotate(90deg); }
-  .rank-pair { grid-template-columns: minmax(0, 1fr) minmax(74px,.4fr) minmax(0,1fr); }
-  .stage-grid, .stage.with-connector .stage-grid { gap: 6px; }
-  .output { grid-template-columns: 1fr; }
-}
-@media(max-width:480px) {
-  body { font-size: 15px; }
-  .rank-pair:not(.output) { grid-template-columns: 1fr; gap: 4px; }
-  .exchange .wire { width: 70px; }
 }
 @media print { body{background:white} main{padding:0} .stage,.intro{break-inside:avoid} }
 </style>
+  <link rel="stylesheet" href="../../assets/reader.css">
 </head>
-<body>
+<body class="reader-note reader-ep">
 <main>
   <header><h1>以 ep_size=2、topk=2 为例的 FSDP2 + EP 端到端数据流</h1></header>
+  <div class="diagram-scroll" role="region" aria-label="术语与计算对照">
   <div class="grid intro">
     <section class="card r0">
       <h2>前置说明 / 术语说明</h2>
@@ -234,7 +222,9 @@ ul,ol { margin: 3px 0 0; padding-left: 1.45em; }
         = Σₖ (top_k_weights[i,k] * expert[top_k_index[i,k]](token[i]))</pre></div>
     </section>
   </div>
+  </div>
 
+  <div class="diagram-scroll" role="region" aria-label="两侧 EP Rank 的输入">
   <div class="grid rank-pair module">
     <section class="card rank-head r0">
       <h2>EP Rank 0（持有 Expert 0–63）</h2>
@@ -248,7 +238,9 @@ ul,ol { margin: 3px 0 0; padding-left: 1.45em; }
       <p>top_k_index: [[64,0], [65,1], ...]</p><p class="caption">全局 expert 编号</p>
     </section>
   </div>
+  </div>
 
+  <div class="diagram-scroll" role="region" aria-label="FSDP2 + EP 七步横向数据流">
   <div class="workflow" aria-label="FSDP2 加 EP 的七步数据流">
     <section class="stage" data-step="1" aria-labelledby="step-1">
       <h2 class="stage-heading" id="step-1"><span class="step-number">1</span>Permute 1：按本地 expert 编号排序</h2>
@@ -423,11 +415,14 @@ top_k_weights)</pre>
       </div>
     </section>
   </div>
+  </div>
 
+  <div class="diagram-scroll" role="region" aria-label="两侧 EP Rank 的输出">
   <div class="grid rank-pair module output">
     <div class="card r0"><span class="histogram" aria-hidden="true"><i></i><i></i><i></i><i></i></span><p><strong>输出：[num_tokens, hidden_size]</strong><br>每个 rank 拿回自己输入 token 对应的完整 expert 输出。</p></div>
     <div class="exchange"><p>完成加权求和后的最终结果</p><span class="wire connection both-ends" aria-hidden="true"><span></span></span></div>
     <div class="card r1"><span class="histogram" aria-hidden="true"><i></i><i></i><i></i><i></i></span><p><strong>输出：[num_tokens, hidden_size]</strong><br>每个 rank 拿回自己输入 token 对应的完整 expert 输出。</p></div>
+  </div>
   </div>
   <section class="card emphasis conclusion">
     <span class="trophy symbol" aria-hidden="true">🏆</span>

@@ -1,30 +1,30 @@
 ---
 name: infra-html-diagrams
-description: Create, redraw, review, and publish self-contained HTML technical diagrams on infra杂谈. Use for diagrams reproduced from an image, multi-rank communication flows, visual corrections, and new diagram chapters in this GitHub Pages repository.
+description: Create, refresh, review, and publish HTML technical diagrams and file navigation on infra杂谈. Use for diagram redraws, multi-rank flows, visual corrections, and new or existing notes in this GitHub Pages repository.
 ---
 
 # Infra HTML diagrams
 
+## Use the Ulysses SP layout as the reference
+
+- Start from `notes/ulysses-sp/index.html`. Use compact, visually separated modules that each explain one concept, example, or operation. Put the diagram, labels, formulas, code, and the explanation they depend on in the same module. Keep the detailed technical content.
+- Arrange each module according to the relationship it explains. Use left and right positions for comparisons, Rank ownership, or horizontal data movement, and upper and lower positions for local steps or levels. Keep the grouping and reading order of the reference. Fit the diagram between adjacent modules with consistent gaps and enough room around the arrows.
+- For multi-rank flows, keep each numbered stage together with its lanes and connectors. Use `notes/fsdp2-ep/index.html` for the Rank comparison and `notes/gpu-rdma/index.html` for topology and linked steps. Preserve their multi-column geometry at the site's content-pane width. Use `.diagram-scroll` from `assets/reader.css` to let wide modules scroll horizontally when their columns would otherwise get cramped.
+
 ## Preserve content and connections
 
 - For a redraw, preserve the supplied source's section and lane order, labels, formulas, code, tensor shapes, examples, and conclusions. Treat a technical correction as a separate requested edit.
-- Before changing arrows, inventory each connector in the original reference by stage, endpoints, direction, and line style. Include small arrows inside a card, dashed comparison lines, and crossed arrows. Preserve their count, route, and direction. A crossed four-headed connector stays crossed. Parallel arrows represent a different drawing.
-- When fixing a redraw, compare against the original source as well as the current HTML. Verify each arrow at the card or row where it belongs.
+- Before changing arrows, inventory each connector in the original reference by stage, endpoints, direction, and line style. Include arrows inside cards, dashed comparison lines, and crossed arrows. Preserve their count, route, and direction. A crossed four-headed connector stays crossed.
+- When fixing a redraw, compare against the original source as well as the current HTML. Check each connector at the card or row where it belongs, including its spacing and endpoints.
 
-## Group related content into cards
+## Apply the site palette
 
-- Follow the section-card hierarchy used in `notes/gpu-rdma/index.html` and `notes/ulysses-sp/index.html`. Give major sections their own white cards with light borders, rounded corners, and enough space between sections.
-- For a multi-rank workflow, put each numbered step in one outer card. Keep the operation title in its header and the corresponding lanes, explanations and arrows together below it. Use inner cards for distinct examples or rank data.
-- Use one step number per group and leave visual separation around arrows. Keep labels, code and examples in their original stage.
+- Use `assets/reader.css` for the gray-white page, charcoal text, fine dividers, and muted blue links. Keep this page palette independent from the colors inside diagrams.
+- Use pale fills inside diagrams to group related content. Use muted blue for general flow and Rank data, soft green for calculation or output where it fits, amber for caveats, and muted coral for highlighted communication steps where the reference uses a separate color. Preserve established color meanings such as the purple RDMA network. Pair each meaningful color with a label, shape, line style, or position.
+- Give equivalent Rank cards the same tint. Use labels and lane positions to identify ownership. Use an opaque white canvas for a standalone PNG export when requested.
 
-## Use a restrained palette
+## Integrate and verify on the site
 
-- Keep the HTML diagram and its PNG export on an opaque white canvas (`#fff`). Use dark navy text, muted blue for arrows and key labels, and blue-gray borders and tints.
-- Use the same pale tint for equivalent rank cards, with rank names, lane positions, and labels identifying ownership. Use line styles or lightness to distinguish tokens or stages. Add another hue only when the supplied source relies on that color to encode information or the user requests it.
-- Draw connectors with consistent geometric shafts and arrowheads. Reserve space between the connected cards, and align the arrows to their ends. Keep labels and badges readable on narrow screens.
-
-## Verify and publish
-
-- Use self-contained HTML with inline styles. Compare the rendered text and numeric examples with the source, and inspect every connector at desktop width, at the site's content-pane width, and when lanes stack. Export the PNG from the final HTML and check that its background is white.
-- Put the chapter at `notes/<chapter>/index.html`. For new chapters, add an entry to the left catalog on the homepage. Publish the HTML and share a separate PNG when requested.
-- Keep this skill under `.agents/skills/` outside the site's catalog and published pages.
+- Place a new chapter at `notes/<chapter>/index.html` and use the shared reader stylesheet. Add its file name under the appropriate collapsible folder in the left catalog. Folder depth defines the tree. Keep in-article headings in the right reading pane.
+- Verify the complete note at its direct URL and when opened from the homepage. At desktop width, verify the side-by-side layouts, all connector directions, and readable label spacing. At narrow widths, verify that wide modules pan within their own region, text and headings fit the page, and the diagrams retain their original left/right and top/bottom relationships.
+- Check that the current file is highlighted and that existing chapter links still resolve. Publish when requested. Keep this skill under `.agents/skills/` outside the site's catalog.

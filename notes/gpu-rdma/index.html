@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="GPU 多卡互联与 RDMA 图解，涵盖硬件拓扑、网卡传输、NCCL 调用和验证。">
-  <meta name="theme-color" content="#163354">
+  <meta name="theme-color" content="#fafaf8">
   <title>GPU 多卡互联与 RDMA | infra杂谈</title>
   <style>
 :root {
@@ -118,33 +118,6 @@ code { font: 600 .87em/1.5 var(--mono); overflow-wrap: anywhere; }
 .sources { margin-top: 16px; color: var(--muted); font-size: .9rem; }
 .sources summary { cursor: pointer; width: fit-content; }
 .sources ul { padding-left: 1.3em; margin-bottom: 0; }
-@media (max-width: 1040px) {
-  .steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .step:nth-child(4)::before { content: none; }
-}
-@media (max-width: 790px) {
-  .topology { grid-template-columns: 1fr; }
-  .network { min-height: 82px; }
-  .network .signal { display: none; }
-  .card-grid { grid-template-columns: 1fr; }
-  .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .step:nth-child(4)::before { content: ""; }
-  .step:nth-child(odd)::before { content: none; }
-}
-@media (max-width: 570px) {
-  .header-inner { gap: 8px; }
-  .site-header a { font-size: .75rem; }
-  .chapter { border-radius: 8px; }
-  .chapter-header { margin-bottom: 12px; }
-  .steps, .decision { grid-template-columns: 1fr; gap: 8px; }
-  .step::before, .branches::before, .branches::after, .branches li::before { display: none; }
-  .data-table { display: block; }
-  .data-table colgroup { display: none; }
-  .data-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  .data-table tbody, .data-table tr, .data-table th, .data-table td { display: block; }
-  .data-table tbody tr { border-bottom: 1px solid var(--line); padding-block: 7px; }
-  .data-table tbody th, .data-table td { border: 0; padding: 2px 0; }
-}
 @media print {
   body { background: white; }
   .site-header { background: white; color: var(--ink); }
@@ -152,14 +125,15 @@ code { font: 600 .87em/1.5 var(--mono); overflow-wrap: anywhere; }
   .chapter { break-inside: avoid; }
 }
   </style>
+  <link rel="stylesheet" href="../../assets/reader.css">
   <script>
     if (window.self !== window.top) {
       document.documentElement.classList.add("embedded");
     }
   </script>
 </head>
-<body>
-  <header class="site-header">
+<body class="reader-note reader-rdma">
+<header class="site-header">
     <div class="header-inner">
       <h1>GPU 多卡互联与 RDMA</h1>
       <a href="../../">技术笔记首页</a>
@@ -171,6 +145,7 @@ code { font: 600 .87em/1.5 var(--mono); overflow-wrap: anywhere; }
         <h2 id="topology-title">硬件拓扑决定有哪些路可走</h2>
         <p class="intro">拓扑描述 GPU、CPU、网卡和交换芯片如何连接。沿着路径可以看出经过几级交换、是否跨 NUMA、哪些设备共用链路。下图是两台服务器的示意，每台只画出 CPU 0 下的 PCIe 设备。</p>
       </header>
+      <div class="diagram-scroll" role="region" aria-label="两台服务器的硬件拓扑">
       <figure class="topology" aria-label="两台服务器的 PCIe 拓扑与跨机网络">
         <div class="node">
           <h3>节点 A</h3>
@@ -196,10 +171,13 @@ code { font: 600 .87em/1.5 var(--mono); overflow-wrap: anywhere; }
           <p class="diagram-caption">B0 与 B1 可另走 NVLink / NVSwitch。</p>
         </div>
       </figure>
+      </div>
+      <div class="diagram-scroll" role="region" aria-label="通信方式对照">
       <div class="card-grid">
         <div class="card blue"><h3>CPU ↔ GPU</h3><p>常见分立 GPU 经 PCIe。GH200 的 Grace ↔ Hopper 经 NVLink-C2C，支持一致性内存访问。</p></div>
         <div class="card green"><h3>同机 GPU ↔ GPU</h3><p>可经 PCIe P2P、NVLink 直连或 NVSwitch。交换芯片按目标端口转发。</p></div>
         <div class="card purple"><h3>跨机 GPU ↔ GPU</h3><p>常见路径包含本机 GPU ↔ 网卡、IB / RoCE 网络、对端网卡 ↔ GPU 三段。</p></div>
+      </div>
       </div>
       <div class="note"><p><strong>共享带宽</strong>　同一颗 PCIe Switch 下的 GPU 与网卡可以在支持时直接 P2P。多个下行设备同时访问主机内存时，可能共用 Switch 上行链路。</p></div>
     </section>
@@ -209,11 +187,14 @@ code { font: 600 .87em/1.5 var(--mono); overflow-wrap: anywhere; }
         <h2 id="rdma-title">RDMA 让网卡直接访问远端缓冲区</h2>
         <p class="intro">一次 RDMA Write 从准备缓冲区开始，经过连接建立、提交、搬运和完成同步。</p>
       </header>
+      <div class="diagram-scroll" role="region" aria-label="通信方式对照">
       <div class="card-grid">
         <div class="card blue"><h3>DMA · 本机</h3><p>设备按命令读写本机内存。例如网卡用 DMA 从 DRAM 读取待发数据。</p></div>
         <div class="card purple"><h3>RDMA · 跨机</h3><p>网卡执行读写请求，按对端授权访问已注册的内存。InfiniBand 和 RoCE 都可承载 RDMA。</p></div>
         <div class="card green"><h3>GPUDirect RDMA · GPU 显存</h3><p>通信库可以把 GPU 显存注册给网卡，网卡即可通过本机 PCIe 直接读取或写入它。</p></div>
       </div>
+      </div>
+      <div class="diagram-scroll" role="region" aria-label="RDMA Write 五步流程">
       <ol class="steps">
         <li class="card step"><h3>注册缓冲区</h3><code>ibv_reg_mr()</code><p>注册地址范围和访问权限，得到内存区域（MR）。</p></li>
         <li class="card step"><h3>建立连接</h3><code>ibv_create_qp()</code><p>建立和配置队列对（QP），交换远端缓冲区地址和访问钥匙 <code class="inline-key">rkey</code>。</p></li>
@@ -221,6 +202,7 @@ code { font: 600 .87em/1.5 var(--mono); overflow-wrap: anywhere; }
         <li class="card step purple"><h3>网卡搬数据</h3><p>源网卡 DMA 读，经网络送到目标网卡。目标网卡校验权限后 DMA 写。</p></li>
         <li class="card step green"><h3>完成与同步</h3><code>ibv_poll_cq()</code><p>查询请求完成。接收端按协议获知何时可以消费数据，并与 GPU stream 协调。</p></li>
       </ol>
+      </div>
       <div class="note"><p><strong>CPU 的角色</strong>　应用或通信库负责注册、提交与协调，Tensor 字节由设备搬运。普通 RDMA Write 需要协议配合，才能通知接收应用何时读取。</p></div>
     </section>
 
@@ -229,6 +211,7 @@ code { font: 600 .87em/1.5 var(--mono); overflow-wrap: anywhere; }
         <h2 id="paths-title">同一个跨机 Tensor 可以走不同路径</h2>
         <p class="intro">节点 A 的 GPU A0 发给节点 B 的 GPU B0。网卡之间保持 RDMA 时，两端仍可分别决定是否经过主机内存。</p>
       </header>
+      <div class="diagram-scroll" role="region" aria-label="跨机传输路径表">
       <table class="data-table paths">
         <colgroup><col><col><col></colgroup>
         <thead><tr><th scope="col">传输方式</th><th scope="col">Tensor 数据路径</th><th scope="col">主机内存中转</th></tr></thead>
@@ -240,6 +223,7 @@ code { font: 600 .87em/1.5 var(--mono); overflow-wrap: anywhere; }
           <tr><th scope="row">TCP Socket</th><td><code>GPU A0 → 主机 A → TCP/IP → 主机 B → GPU B0</code></td><td><span class="tag-amber">双端中转</span></td></tr>
         </tbody>
       </table>
+      </div>
       <div class="note"><p><strong>例子</strong>　双端 GDR 时，源网卡经本机 PCIe 读取 GPU A0 的显存，对端网卡经自己的 PCIe 路径写入 GPU B0 的显存。</p></div>
     </section>
 
@@ -248,6 +232,7 @@ code { font: 600 .87em/1.5 var(--mono); overflow-wrap: anywhere; }
         <h2 id="transport-title">NCCL 按连接选择传输</h2>
         <p class="intro">训练框架划分 rank 组。NCCL 根据拓扑和可用能力组织 channel，为每条收发连接设置传输。</p>
       </header>
+      <div class="diagram-scroll" role="region" aria-label="NCCL 传输选择图">
       <figure class="decision" aria-label="NCCL 的 P2P、共享内存和网络传输选择">
         <div class="root"><h3><code>selectTransport()</code></h3><p>检查传输的 <code>canConnect()</code>，选中后执行对应的 <code>setup()</code>。</p></div>
         <ol class="branches">
@@ -256,6 +241,7 @@ code { font: 600 .87em/1.5 var(--mono); overflow-wrap: anywhere; }
           <li class="card"><h3>P2P 和 SHM 未选中，NET 可用</h3><p>IB / RoCE 等后端可分别检查发送端和接收端的 GDR。Socket 使用主机缓冲区。</p></li>
         </ol>
       </figure>
+      </div>
       <div class="note"><p><strong>按连接选</strong>　同一次 All-to-All 可以在机内连接上走 P2P，在跨机连接上走 NET。平台专用传输和网络插件可以改变具体路径。</p></div>
     </section>
 
@@ -264,6 +250,7 @@ code { font: 600 .87em/1.5 var(--mono); overflow-wrap: anywhere; }
         <h2 id="calls-title">从训练接口追到网卡提交函数</h2>
         <p class="intro">源码示例使用 Megatron Core 0.16、PyTorch 2.9.0 和 NCCL 2.27.7-1，涉及训练提交、连接建立和数据传输三个阶段。</p>
       </header>
+      <div class="diagram-scroll" role="region" aria-label="NCCL 调用链表">
       <table class="data-table calls">
         <colgroup><col><col></colgroup>
         <thead><tr><th scope="col">操作或阶段</th><th scope="col">入口与调用</th></tr></thead>
@@ -274,6 +261,7 @@ code { font: 600 .87em/1.5 var(--mono); overflow-wrap: anywhere; }
           <tr><th scope="row">IB / RoCE 提交数据</th><td><code>ncclIbIsend() → ncclIbMultiSend() → wrap_ibv_post_send()</code><p>此实现用 RDMA Write 类请求。CUDA stream 依赖和接收完成由通信库协调。</p></td></tr>
         </tbody>
       </table>
+      </div>
       <details class="sources">
         <summary>查看对应源码</summary>
         <ul>
@@ -292,6 +280,7 @@ code { font: 600 .87em/1.5 var(--mono); overflow-wrap: anywhere; }
         <h2 id="validation-title">从机器配置到实际验证</h2>
         <p class="intro">从 GPU 互访能力查到实际训练选用的网卡和传输。能测通主机内存上的 RDMA 后，再单独确认网卡能否直接访问显存。</p>
       </header>
+      <div class="diagram-scroll" role="region" aria-label="配置和验证方法表">
       <table class="data-table checks">
         <colgroup><col><col><col></colgroup>
         <thead><tr><th scope="col">检查项</th><th scope="col">命令或工具</th><th scope="col">核对内容</th></tr></thead>
@@ -302,6 +291,7 @@ code { font: 600 .87em/1.5 var(--mono); overflow-wrap: anywhere; }
           <tr><th scope="row">复现训练通信</th><td><code>NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT,NET,GRAPH</code></td><td>核对网卡和传输，再用相同 GPU 分组的 NCCL Tests 实测。</td></tr>
         </tbody>
       </table>
+      </div>
       <div class="note"><p><strong>配置归属</strong>　整机布线决定硬件拓扑。宿主机驱动和平台所需的 Fabric Manager / NVLSM 初始化互联。网卡驱动、IB / RoCE 网络以及 DMA-BUF 或 <code>nvidia-peermem</code> 支撑 GDR。</p></div>
       <details class="sources">
         <summary>查看 NVIDIA 参考文档</summary>

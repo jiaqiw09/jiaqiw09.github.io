@@ -4,83 +4,53 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="infra杂谈，涵盖大模型训练、GPU 通信和系统实现。">
-  <meta name="theme-color" content="#163354">
+  <meta name="theme-color" content="#fafaf8">
   <title>infra杂谈</title>
-  <style>
-:root {
-  color-scheme: light;
-  --ink: #172b43;
-  --muted: #496079;
-  --paper: #f1f5fa;
-  --line: #d2deea;
-  --blue: #244f92;
-  font-family: Inter, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-}
-* { box-sizing: border-box; }
-body { margin: 0; background: var(--paper); color: var(--ink); font-size: 16px; line-height: 1.65; }
-a { color: var(--blue); text-underline-offset: .2em; }
-a:focus-visible { outline: 3px solid #4678ca; outline-offset: 3px; border-radius: 3px; }
-.site-header { background: #163354; color: white; }
-.header-inner, .layout {
-  max-width: 1540px;
-  margin: auto;
-  padding-inline: clamp(12px, 3.15vw, 52px);
-}
-.header-inner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-block: 14px; }
-.header-inner a { color: #e2ecfb; }
-.site-name { font-size: clamp(1.2rem, 2.4vw, 1.75rem); font-weight: 750; text-decoration: none; }
-.layout {
-  display: grid;
-  grid-template-columns: clamp(155px, 18vw, 250px) minmax(0, 1fr);
-  align-items: start;
-  gap: clamp(10px, 2vw, 30px);
-  padding-block: clamp(14px, 2.5vw, 32px);
-}
-aside { position: sticky; top: 16px; min-width: 0; max-height: calc(100dvh - 32px); overflow-y: auto; }
-.catalog { padding: 12px 9px; background: white; border: 1px solid var(--line); border-radius: 12px; }
-.catalog h1 { color: var(--muted); font-size: .875rem; margin: 0 8px 8px; line-height: 1.4; }
-.catalog ul { list-style: none; margin: 0; padding: 0; }
-.catalog li + li { margin-top: 4px; }
-.catalog a { display: block; padding: 7px 8px; border-radius: 6px; color: var(--ink); font-size: .94rem; font-weight: 650; text-decoration: none; overflow-wrap: anywhere; }
-.catalog a:hover { background: #f0f4fa; }
-.catalog a[aria-current="page"] { color: #174378; background: #e6efff; box-shadow: inset 3px 0 #3e6db3; }
-main { min-width: 0; }
-iframe { display: block; width: 100%; height: 75vh; min-height: 440px; border: 0; }
-@media (max-width: 570px) {
-  .layout { grid-template-columns: clamp(90px, 25vw, 130px) minmax(0, 1fr); gap: 8px; padding-inline: 9px; }
-  .catalog { padding: 7px 4px; border-radius: 8px; }
-  .catalog h1 { margin-inline: 4px; }
-  .catalog a { padding-inline: 5px; font-size: .78rem; }
-}
-  </style>
+  <link rel="stylesheet" href="./assets/reader.css">
 </head>
-<body>
-  <header class="site-header">
-    <div class="header-inner">
+<body class="reader-home">
+  <header class="reader-header">
+    <div class="reader-header-inner">
       <a class="site-name" href="./">infra杂谈</a>
-      <a href="https://github.com/jiaqiw09">GitHub</a>
+      <a href="https://github.com/jiaqiw09">GitHub ↗</a>
     </div>
   </header>
-  <div class="layout">
-    <aside>
-      <nav class="catalog" aria-labelledby="catalog-title">
-        <h1 id="catalog-title">章节目录</h1>
-        <ul>
-          <li><a href="./notes/gpu-rdma/" data-chapter="gpu-rdma" target="chapter-content">GPU 多卡互联与 RDMA</a></li>
-          <li><a href="./notes/ulysses-sp/" data-chapter="ulysses-sp" target="chapter-content">Ulysses 序列并行（SP）</a></li>
-          <li><a href="./notes/fsdp2-ep/" data-chapter="fsdp2-ep" target="chapter-content">FSDP2 + EP 端到端数据流</a></li>
-        </ul>
+  <div class="reader-layout">
+    <details class="reader-sidebar" open>
+      <summary class="reader-toggle">目录</summary>
+      <nav class="catalog" aria-label="文件目录">
+        <h1>目录</h1>
+        <details open>
+          <summary>GPU 通信</summary>
+          <details class="branch" open>
+            <summary>多卡互联</summary>
+            <ul class="branch">
+              <li><a href="./notes/gpu-rdma/" data-chapter="gpu-rdma" target="chapter-content" aria-current="page">GPU 多卡互联与 RDMA</a></li>
+            </ul>
+          </details>
+        </details>
+        <details open>
+          <summary>分布式训练</summary>
+          <details class="branch" open>
+            <summary>并行策略</summary>
+            <ul class="branch">
+              <li><a href="./notes/ulysses-sp/" data-chapter="ulysses-sp" target="chapter-content">Ulysses 序列并行（SP）</a></li>
+              <li><a href="./notes/fsdp2-ep/" data-chapter="fsdp2-ep" target="chapter-content">FSDP2 + EP 端到端数据流</a></li>
+            </ul>
+          </details>
+        </details>
       </nav>
-    </aside>
-    <main aria-label="章节内容">
-      <iframe name="chapter-content" title="章节内容"></iframe>
-      <noscript><p>选择左侧章节打开内容。</p></noscript>
+    </details>
+    <main class="reader-pane" aria-label="文件内容">
+      <iframe src="./notes/gpu-rdma/" name="chapter-content" title="GPU 多卡互联与 RDMA"></iframe>
     </main>
   </div>
   <script>
     const chapterLinks = [...document.querySelectorAll(".catalog a[data-chapter]")];
     const frame = document.querySelector('iframe[name="chapter-content"]');
-    let displayedUrl;
+    const sidebar = document.querySelector(".reader-sidebar");
+    const compact = matchMedia("(max-width: 890px)");
+    let displayedUrl = frame.src;
     const resize = new ResizeObserver(() => {
       const body = frame.contentDocument?.body;
       if (body) {
@@ -96,12 +66,13 @@ iframe { display: block; width: 100%; height: 75vh; min-height: 440px; border: 0
       }
     });
 
+    function syncSidebar() {
+      sidebar.open = !compact.matches;
+    }
+
     function showChapter() {
       const requested = new URLSearchParams(location.search).get("chapter");
       const selected = chapterLinks.find(link => link.dataset.chapter === requested) ?? chapterLinks[0];
-      if (!selected) {
-        return;
-      }
       for (const link of chapterLinks) {
         if (link === selected) {
           link.setAttribute("aria-current", "page");
@@ -128,10 +99,15 @@ iframe { display: block; width: 100%; height: 75vh; min-height: 440px; border: 0
           history.pushState(null, "", url);
         }
         showChapter();
+        if (compact.matches) {
+          sidebar.open = false;
+        }
         window.scrollTo(0, 0);
       });
     }
+    compact.addEventListener("change", syncSidebar);
     window.addEventListener("popstate", showChapter);
+    syncSidebar();
     showChapter();
   </script>
 </body>

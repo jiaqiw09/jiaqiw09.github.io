@@ -92,22 +92,25 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
 .directions p:last-child{text-align:right}
 .summary{display:grid;grid-template-columns:max-content 36px minmax(0,1fr);align-items:center;gap:10px}
 .summary h2{margin:0}.summary .star{color:var(--blue);font-size:25px;text-align:center}
-@media(max-width:930px){.four{grid-template-columns:repeat(2,minmax(0,1fr))}.steps-four{gap:9px}.steps-four .card+.card::before{display:none}.setup{grid-template-columns:1fr 1fr}.setup>div:first-child{grid-column:1/-1}.a-top{grid-template-columns:minmax(0,1fr) 85px minmax(0,1fr)}}
-@media(max-width:620px){.four,.three,.two,.setup,.a-top,.biased,.row{grid-template-columns:1fr}.row{gap:3px}.setup>div:first-child{grid-column:auto}.arrow-detail .arrow{transform:rotate(90deg)}.last-step{max-width:none}.summary{grid-template-columns:max-content minmax(0,1fr)}.summary p{grid-column:1/-1;min-width:0}.rank-pair{grid-template-columns:minmax(0,1fr) 27px minmax(0,1fr)}.train-table{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:930px){.a-top{grid-template-columns:minmax(0,1fr) 85px minmax(0,1fr)}}
+@media(max-width:620px){.summary{grid-template-columns:max-content minmax(0,1fr)}.summary p{grid-column:1/-1;min-width:0}}
 @media print{body{background:white}main{padding:0}section{break-inside:avoid}}
 </style>
+  <link rel="stylesheet" href="../../assets/reader.css">
 </head>
-<body>
+<body class="reader-note reader-ulysses">
 <main>
   <header class="header"><h1>ULySSes Sequence Parallelism (SP) 流程图</h1></header>
 
   <section aria-labelledby="principle">
     <h2 id="principle">1. 核心原理</h2>
+    <div class="diagram-scroll" role="region" aria-label="Ulysses 四项核心原理">
     <div class="grid four">
       <div class="card blue lead-card"><span class="icon" aria-hidden="true">▤</span><div><h3>非 Attention 层：</h3><p>Embedding / LayerNorm / MLP<br>按序列切分仍然正确<br><span class="muted">（per-token 独立）</span></p></div></div>
       <div class="card orange lead-card"><span class="icon" aria-hidden="true">⟐</span><div><h3>Attention 层：</h3><p><strong>需要完整序列</strong><br>直接按序列切分会导致错误<br>因为 QK^T 需要每个 query<br>看见所有 key</p></div></div>
       <div class="card green lead-card"><span class="icon" aria-hidden="true">◫</span><div><h3>关键性质：</h3><p>不同 attention head<br>彼此独立<br>因此可以按 head<br>分工计算</p></div></div>
       <div class="card blue lead-card"><span class="icon" aria-hidden="true">⇄</span><div><h3>解决思路：</h3><p>通过两次 All-to-All 在<br>「部分序列 + 全部头」↔<br>「完整序列 + 部分头」之间切换</p></div></div>
+    </div>
     </div>
     <div class="stack">
       <p class="strip blue">💡 核心思想：牺牲部分头，换取完整序列，从而保证 Attention 计算正确。</p>
@@ -117,6 +120,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
 
   <section aria-labelledby="setup">
     <h2 id="setup">2. 运行示例设定</h2>
+    <div class="diagram-scroll" role="region" aria-label="SP 运行设定及 DP 组">
     <div class="grid setup">
       <div class="card blue">
         <ul class="setup-list">
@@ -145,11 +149,13 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
         <p class="group-size mono">cp_size=2</p>
       </div>
     </div>
+    </div>
     <p class="dp-size mono">dp_size=2</p>
   </section>
 
   <section aria-labelledby="flow">
     <h2 id="flow">3. SP 主流程（A → G）</h2>
+    <div class="diagram-scroll" role="region" aria-label="Ulysses A 到 G 主流程">
     <div class="flow">
       <article class="row">
         <div class="row-heading blue"><span class="badge">A</span>输入与切分</div>
@@ -241,21 +247,25 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
         </div>
       </article>
     </div>
+    </div>
   </section>
 
   <section aria-labelledby="flash">
     <h2 id="flash">4. 为什么通常要用 Flash Attention?</h2>
+    <div class="diagram-scroll" role="region" aria-label="Flash Attention 四步对照">
     <div class="grid four steps-four">
       <div class="card blue"><h3>(1) UlySSes 改变的是分布式布局</h3><p>第一次 All-to-All 之后，<br>每张卡拿到的是<br>「完整 seq + 部分 heads」，<br>不是「短 seq + 全部 heads」。</p></div>
       <div class="card orange"><h3>(2) 普通 attention 的问题</h3><p>若直接构造 attention scores，<br>shape 是 [B, H, S, S]。<br>当 seq_len 很长时，<br>S × S 显存会爆炸。</p><p class="inset">例：S = 128K, heads_per_rank = 8，<br>bf16 时，仅 scores 就约 274 GB。</p></div>
       <div class="card green"><h3>(3) Flash Attention 的作用</h3><p>FA 按 block 分块计算，<br>在线 softmax，<br>不显式保存完整 S × S<br>attention matrix，<br>显存从接近 O(S²)<br>降到更接近 O(S)。</p></div>
       <div class="card blue"><h3>(4) 结论</h3><p>UlySSes 负责跨卡布局切换；<br>Flash Attention 负责让每张卡上的<br>full-seq attention 算得动。<br>所以工程上二者几乎绑定使用。</p></div>
     </div>
+    </div>
     <div class="stack"><p class="strip orange">💡 补充：理论上也可换成 SDPA / NPU fused attention 等高效 kernel，但前提仍然是它必须支持 full-seq + local-head 的高效计算。</p></div>
   </section>
 
   <section aria-labelledby="details">
     <h2 id="details">5. SP 下的关键特殊点（举例说明）</h2>
+    <div class="diagram-scroll" role="region" aria-label="SP 的四个特殊环节">
     <div class="grid four details">
       <div class="card blue">
         <h3>(1) Loss 的标签对齐不能本地做</h3>
@@ -307,6 +317,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
         <p class="center">↓ All-Reduce(SUM)</p>
         <p class="strip blue">全局 grad_norm = 4.25</p>
       </div>
+    </div>
     </div>
   </section>
 
