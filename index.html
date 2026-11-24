@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Jiaqi 的技术笔记，涵盖大模型训练、GPU 通信和系统实现。">
+  <title>Jiaqi 的技术笔记</title>
+  <style>
+:root {
+  color-scheme: light;
+  --ink: #17253b;
+  --muted: #54647b;
+  --blue: #234b9a;
+  --line: #d8e2ef;
+  --paper: #f3f6fb;
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font-size: 16px; line-height: 1.65; }
+header, main, footer { max-width: 1024px; margin-inline: auto; padding-inline: clamp(18px, 4vw, 42px); }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-block: 22px; }
+header a { font-weight: 650; text-decoration: none; }
+header .brand { color: var(--ink); }
+a { color: var(--blue); text-underline-offset: 4px; }
+a:hover { text-decoration: underline; }
+a:focus-visible { outline: 3px solid #4777cc; outline-offset: 4px; border-radius: 3px; }
+.hero { padding: clamp(29px, 6vw, 68px) clamp(22px, 5vw, 56px); background: #192f53; color: #f9fbff; border-radius: 18px; }
+.hero p { max-width: 43rem; margin: 12px 0 0; color: #d9e5fa; }
+h1, h2, h3 { line-height: 1.22; margin: 0; }
+h1 { font-size: clamp(2.15rem, 5vw, 3.75rem); letter-spacing: -.045em; }
+h2 { font-size: clamp(1.35rem, 3vw, 1.8rem); margin-bottom: 15px; }
+h3 { font-size: 1.2rem; }
+section { margin-block: 32px; }
+.note { padding: clamp(19px, 4vw, 32px); border: 1px solid var(--line); background: white; border-radius: 14px; }
+.note p, .description { color: var(--muted); max-width: 46rem; }
+nav.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.button { padding: 7px 13px; border-radius: 7px; border: 1px solid #adc2e3; background: #eff4ff; text-decoration: none; font-weight: 650; }
+.button.primary { background: var(--blue); border-color: var(--blue); color: white; }
+figure { margin: 0; }
+figure img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 12px; }
+figcaption { color: var(--muted); margin-top: 8px; }
+footer { color: var(--muted); margin-block: 34px; font-size: 14px; }
+</style>
+</head>
+<body>
+  <header><a class="brand" href="./">Jiaqi 的技术笔记</a><a href="https://github.com/jiaqiw09">GitHub</a></header>
+  <main>
+    <div class="hero">
+      <h1>从模型训练到系统实现</h1>
+      <p>围绕分布式训练拆解硬件路径、框架调用和排查方法。</p>
+    </div>
+    <section aria-labelledby="notes">
+      <h2 id="notes">技术笔记</h2>
+      <article class="note">
+        <h3><a href="./notes/gpu-rdma/">GPU 多卡互联与 RDMA</a></h3>
+        <p>跟着一个 Tensor 从本机显存到达对端 GPU，理解 PCIe、NVLink、GPUDirect RDMA，以及 NCCL 如何选择同机和跨机传输。</p>
+        <nav class="actions" aria-label="专题入口">
+          <a class="button primary" href="./notes/gpu-rdma/">阅读专题</a>
+        </nav>
+      </article>
+    </section>
+  </main>
+</body>
+</html>
