@@ -1,404 +1,369 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#141e2b">
-<title>一个 Tensor 怎么走？· GPU 通信路径</title>
-<style>
-:root{color-scheme:light;--paper:#f4f3ee;--white:#fdfdfb;--ink:#17232b;--muted:#56646e;--line:#d6ddd9;--dark:#141e2b;--dark-line:#344756;--accent:#9af1cd;--mono:"IBM Plex Mono","SFMono-Regular",Consolas,monospace;--sans:"Inter","PingFang SC","Microsoft YaHei",system-ui,sans-serif}
-*{box-sizing:border-box}
-body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.6 var(--sans)}
-button,select{font:inherit;color:inherit}
-button{cursor:pointer}
-button:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid #32b78a;outline-offset:3px}
-a{color:#146550;text-underline-offset:3px}
-code{font-family:var(--mono);font-size:.92em;overflow-wrap:anywhere}
-main{max-width:1440px;margin:auto;padding:28px clamp(16px,4vw,58px) 26px}
-header{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;margin-bottom:22px}
-.kicker{display:flex;align-items:center;gap:10px;color:#31594f;font:700 12px var(--mono)}
-.kicker::before{content:"";width:18px;height:10px;border:2px solid #25826a;border-radius:2px;box-shadow:4px 4px 0 #badccf}
-h1{font-size:clamp(31px,5.2vw,64px);font-weight:800;line-height:1.12;letter-spacing:-.065em;margin:10px 0 6px}
-header p{color:var(--muted);margin:0}
-.version{font:11px/1.6 var(--mono);white-space:nowrap;color:var(--muted);border-bottom:1px solid var(--line);padding-bottom:4px}
-.workbench{display:grid;grid-template-columns:minmax(235px,274px) minmax(0,1fr);gap:14px;align-items:start}
-.panel{background:var(--white);border:1px solid var(--line);border-radius:13px;overflow:hidden}
-.rail{padding:18px 15px 16px}
-h2,h3,p{margin-top:0}
-h2{font-size:17px;margin-bottom:4px}
-.subtitle{color:var(--muted);font-size:12px;margin-bottom:14px}
-.tree-section+.tree-section{margin-top:14px;padding-top:13px;border-top:1px solid var(--line)}
-.tree-root{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;margin:0}
-.tree-root::before{content:"";display:block;width:8px;height:8px;border:2px solid #507b6f;border-radius:50%;flex:none}
-.tree-group{position:relative;margin-left:4px;padding:6px 0 0 15px}
-.tree-group::before{content:"";position:absolute;left:0;top:0;bottom:14px;border-left:1px solid #a5b7b1}
-.branch-label{display:block;color:var(--muted);font:600 11px/1.45 var(--mono);margin:3px 0 4px 2px}
-.branch{position:relative;width:100%;text-align:left;display:flex;gap:8px;align-items:center;justify-content:space-between;padding:4px 8px;margin-top:4px;min-height:31px;background:#f5f7f5;border:1px solid #e6ebe7;border-radius:5px;font-size:12px;font-weight:650}
-.branch::before{content:"";position:absolute;left:-16px;top:50%;width:15px;border-top:1px solid #a5b7b1}
-.branch:hover{background:#e6f3ee}
-.branch[aria-pressed=true]{background:#d5f3e6;border-color:#88c9b4;color:#10483b}
-.branch[aria-pressed=true]::after{content:"";width:7px;height:7px;background:#197d63;border-radius:50%;flex:none}
-.output{display:grid;gap:14px;min-width:0}
-.diagram{background:var(--dark);color:#f4f8fb;border:1px solid #1c2c39;border-radius:13px;padding:clamp(14px,2vw,23px);overflow:hidden}
-.diagram-top{display:flex;justify-content:space-between;align-items:start;gap:10px;margin-bottom:13px}
-.diagram h2{font-size:clamp(20px,2.6vw,29px);line-height:1.22;letter-spacing:-.04em;margin:0 0 6px}
-.diagram p{margin:0}
-.diagram .subtitle{color:#b1c2ce}
-legend{padding:0;font-weight:700}
-.gdr-controls{display:flex;align-items:center;gap:11px;margin:0 0 14px;padding:7px 10px 8px;border:1px solid #3d5465;border-radius:8px;color:#c1d0da;font-size:12px}
-.gdr-controls[hidden]{display:none}
-.gdr-controls label{display:flex;align-items:center;gap:5px;cursor:pointer}
-.gdr-controls input{accent-color:var(--accent);margin:0}
-.track{display:grid;grid-template-columns:minmax(0,1fr) minmax(96px,.66fr) minmax(0,1fr);gap:10px;align-items:stretch}
-.zone{min-width:0;border:1px solid var(--dark-line);border-radius:8px;background:#1b2837;padding:10px;display:flex;flex-direction:column;justify-content:center}
-.zone-title{display:flex;justify-content:space-between;align-items:center;gap:6px;color:#b7c9d6;font:700 11px/1.4 var(--mono);margin-bottom:9px}
-.zone-title::after{content:"";height:1px;flex:1;background:#3c5060}
-.node{display:grid;grid-template-columns:15px minmax(0,1fr);align-items:center;gap:8px;min-height:40px;padding:6px 7px;border:1px solid #465c6c;border-radius:6px;background:#233547;font-size:12px;font-weight:700;line-height:1.4;overflow-wrap:anywhere}
-.node small{display:block;font-size:10px;font-weight:500;color:#c3cfdb;margin-top:2px}
-.node.hardware{background:#213d40;border-color:#38706a}
-.node.memory{background:#46392b;border-color:#876740}
-.node.gpu{border-color:#567eb4;background:#253e59}
-.glyph{width:11px;height:11px;display:inline-block;justify-self:center;border:1px solid #b1c7da;border-radius:2px;position:relative}
-.hardware .glyph{border-radius:50%;border-color:#94e0c8}
-.memory .glyph{height:8px;border-color:#f5cc91}
-.memory .glyph::after,.gpu .glyph::after{content:"";position:absolute;inset:2px;border-left:1px solid currentColor;border-right:1px solid currentColor;opacity:.75}
-.step-arrow{margin-left:13px;height:10px;border-left:1px solid #6bcbb0;position:relative}
-.step-arrow::before{content:"";position:absolute;bottom:0;left:-3px;border-top:4px solid #6bcbb0;border-left:2.5px solid transparent;border-right:2.5px solid transparent}
-.bridge{display:grid;place-items:center;text-align:center;align-content:center;gap:6px;min-width:0}
-.bridge b{font-size:12px;color:var(--accent);overflow-wrap:anywhere}
-.bridge span{font-size:11px;color:#b1c2ce;overflow-wrap:anywhere}
-.bridge-wire{width:100%;height:2px;background:#68998f;position:relative;margin:3px 0}
-.bridge-wire::after{content:"";position:absolute;right:-1px;top:-3px;border-left:6px solid #9af1cd;border-top:4px solid transparent;border-bottom:4px solid transparent}
-.bridge-wire::before{content:"";position:absolute;left:0;top:-1px;width:11px;height:4px;background:var(--accent);border-radius:3px;box-shadow:0 0 7px #9af1cd80;animation:transmit 2s ease-in-out infinite}
-@keyframes transmit{0%{left:0;opacity:0}20%{opacity:1}85%{left:calc(100% - 12px);opacity:1}100%{left:calc(100% - 12px);opacity:0}}
-.network .zone{justify-content:flex-end}
-.network .zone-title{margin-bottom:auto;padding-bottom:9px}
-.network .zone:last-child .step-arrow{margin-left:0;margin-right:13px;align-self:end}
-.network .zone:last-child .step-arrow::before{bottom:auto;top:0;right:-2px;left:auto;border-top:0;border-bottom:4px solid #6bcbb0}
-.network .zone:last-child .step-arrow{height:10px;width:1px}
-.network .bridge{position:relative;align-self:end;gap:0;padding-bottom:8px;padding-top:15px;transform:translateY(-22px)}
-.network .bridge b{line-height:1.3}
-.network .bridge span{position:absolute;left:0;right:0;bottom:0;transform:translateY(40%);line-height:1.2}
-.diagram .caption{border-top:1px solid var(--dark-line);margin-top:13px;padding-top:10px;font-size:12px;color:#c1d1dd}
-.calls{padding:15px clamp(12px,2vw,22px)}
-.calls-top{display:flex;gap:8px;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap}
-.switcher{display:flex;gap:3px;border:1px solid var(--line);border-radius:7px;padding:3px;background:#edf1ee}
-.switcher[hidden]{display:none}
-.switcher button{font-size:11px;border:0;background:transparent;border-radius:4px;padding:4px 7px;white-space:nowrap}
-.switcher button[aria-pressed=true]{background:#fff;color:#125444;box-shadow:0 1px 3px #112b2220;font-weight:700}
-.call-chain{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0;padding:0;list-style:none}
-.call-chain li{min-width:0;background:#eef4f1;border:1px solid #dbe8e1;border-radius:7px;padding:7px 8px;position:relative}
-.call-chain li+li::before{content:"";position:absolute;left:-11px;top:50%;width:9px;height:1px;background:#5c9687}
-.call-chain li+li::after{content:"";position:absolute;left:-4px;top:calc(50% - 2px);border-left:3px solid #5c9687;border-top:2px solid transparent;border-bottom:2px solid transparent}
-.call-chain span{display:block;font-size:10px;color:#49635b;margin-bottom:2px}
-.call-chain code{display:block;color:#123f34;font-size:11px;font-weight:700}
-.notes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px;margin-top:13px;padding-top:11px;border-top:1px solid var(--line)}
-.notes h3{font-size:12px;margin-bottom:3px}
-.notes p{color:var(--muted);font-size:12px;margin-bottom:0;overflow-wrap:anywhere}
-footer{margin:14px 0 0;color:var(--muted);font-size:12px}
-footer summary{cursor:pointer;color:#31594f;font-weight:700}
-footer ul{display:flex;gap:6px 20px;flex-wrap:wrap;list-style:none;padding:0;margin:8px 0}
-@media(max-width:875px){.workbench{grid-template-columns:minmax(190px,218px) minmax(0,1fr)}.rail{padding-inline:11px}}
-@media(max-width:700px){main{padding-top:17px}header{display:block}.version{display:inline-block;margin-top:9px}.workbench{display:flex;flex-direction:column}.workbench>*{width:100%}.trees{display:grid;grid-template-columns:1fr 1fr;gap:9px}.tree-section+.tree-section{border-top:0;margin-top:0;padding-top:0}.tree-section:last-child{grid-column:1/-1}.tree-section:last-child .tree-group{display:flex;flex-wrap:wrap;gap:4px}.tree-section:last-child .branch{width:auto}.tree-section:last-child .branch:not(:first-child)::before{display:none}}
-@media(max-width:445px){.track{gap:5px;grid-template-columns:minmax(0,1fr) minmax(55px,.47fr) minmax(0,1fr)}.zone{padding:5px}.node{grid-template-columns:9px minmax(0,1fr);gap:5px;padding:4px;font-size:11px}.node small,.bridge span{font-size:9px}.glyph{transform:scale(.8)}.call-chain{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 12px}.call-chain li:nth-child(3)::before,.call-chain li:nth-child(3)::after{content:none}.notes{grid-template-columns:1fr;gap:8px}}
-@media(prefers-reduced-motion:reduce){.bridge-wire::before{animation:none}}
-.back-home{display:inline-flex;margin-bottom:14px;font-size:13px;font-weight:650}
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="GPU 多卡互联与 RDMA 图解，涵盖硬件拓扑、网卡传输、NCCL 调用和验证。">
+  <meta name="theme-color" content="#163354">
+  <title>GPU 多卡互联与 RDMA | Jiaqi 的技术笔记</title>
+  <style>
+:root {
+  color-scheme: light;
+  --ink: #172b43;
+  --muted: #496079;
+  --paper: #f1f5fa;
+  --line: #d2deea;
+  --blue: #244f92;
+  --blue-bg: #eef4ff;
+  --green: #0a6650;
+  --green-bg: #ebf8f2;
+  --purple: #5e418e;
+  --purple-bg: #f3eefb;
+  --amber: #804e10;
+  --amber-bg: #fff4dc;
+  --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-family: Inter, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); line-height: 1.65; }
+a { color: var(--blue); text-underline-offset: .2em; }
+a:focus-visible, summary:focus-visible { outline: 3px solid #4678ca; outline-offset: 3px; border-radius: 3px; }
+h1, h2, h3, p { margin: 0; }
+h1, h2, h3 { line-height: 1.3; }
+code { font: 600 .87em/1.5 var(--mono); overflow-wrap: anywhere; }
+.site-header { background: #163354; color: white; }
+.header-inner {
+  max-width: 1540px;
+  padding: 15px clamp(16px, 3.15vw, 52px);
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  align-items: center;
+  margin: auto;
+}
+.site-header h1 { font-size: clamp(1.22rem, 2.4vw, 1.9rem); letter-spacing: -.035em; }
+.site-header a { color: #d7e5fa; font-size: .875rem; white-space: nowrap; }
+.layout {
+  max-width: 1540px;
+  margin: auto;
+  padding: clamp(13px, 2.5vw, 38px) clamp(10px, 3.15vw, 52px);
+  display: grid;
+  grid-template-columns: clamp(155px, 17vw, 245px) minmax(0, 1fr);
+  gap: clamp(12px, 2vw, 32px);
+  align-items: start;
+}
+aside { position: sticky; top: 16px; min-width: 0; }
+.toc { border: 1px solid var(--line); background: #fff; border-radius: 12px; padding: 13px 10px; }
+.toc h2 { font-size: .875rem; color: var(--muted); margin: 0 9px 8px; }
+.toc ul { list-style: none; padding: 0; margin: 0; }
+.toc li + li { margin-top: 4px; }
+.toc a { display: block; text-decoration: none; padding: 7px 9px; border-radius: 7px; color: var(--ink); font-size: .92rem; font-weight: 600; }
+.toc a:hover { background: #f0f4fa; }
+.toc a[aria-current="location"] { color: #174378; background: #e6efff; box-shadow: inset 3px 0 #3e6db3; }
+main { min-width: 0; }
+.chapter { background: white; border: 1px solid var(--line); padding: clamp(12px, 2.4vw, 34px); border-radius: 14px; scroll-margin-top: 16px; }
+.chapter:not([hidden]) + .chapter:not([hidden]) { margin-top: 14px; }
+.chapter[hidden] { display: none; }
+.chapter-header { margin-bottom: 19px; }
+.chapter h2 { font-size: clamp(1.24rem, 2.7vw, 2.3rem); letter-spacing: -.035em; }
+.chapter h3 { font-size: 1rem; }
+.chapter p { margin-top: 5px; }
+.chapter .intro { color: var(--muted); margin-top: 8px; }
+.card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 13px; }
+.card { border: 1px solid var(--line); border-radius: 9px; padding: 11px 12px; }
+.blue { background: var(--blue-bg); color: var(--blue); }
+.green { background: var(--green-bg); color: var(--green); border-color: #aadcca; }
+.purple { background: var(--purple-bg); color: var(--purple); border-color: #d6c7ed; }
+.card p, .step p { color: var(--ink); }
+.note { background: #edf3fb; border-left: 3px solid #608cc4; padding: 9px 11px; margin-top: 14px; border-radius: 0 6px 6px 0; }
+.note p { margin: 0; }
+.topology { display: grid; grid-template-columns: minmax(0, 1fr) minmax(95px, .46fr) minmax(0, 1fr); gap: 8px; margin: 0; }
+.node { position: relative; padding: 10px; background: #f2f6fc; border: 1px solid #c0d4ef; border-radius: 9px; text-align: center; }
+.node h3 { text-align: left; color: var(--blue); margin-bottom: 7px; }
+.cpu-pair, .endpoints { display: grid; align-items: center; gap: 5px; }
+.cpu-pair { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+.endpoints { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.device { display: grid; place-items: center; border: 1px solid #c2d4ed; border-radius: 5px; background: white; padding: 4px; min-height: 32px; font-size: .85rem; font-weight: 650; overflow-wrap: anywhere; }
+.numa, .pcie-root, .diagram-caption { color: var(--muted); font-size: .78rem; }
+.pcie-root { display: grid; place-items: center; padding-block: 3px; }
+.switch { width: 72%; margin: auto; background: #e1edff; color: var(--blue); }
+.ports { position: relative; display: flex; justify-content: space-between; margin: 9px 16.2% 0; border-top: 1px solid #648ac3; height: 11px; }
+.ports::before { content: ""; position: absolute; left: 50%; top: -10px; height: 9px; border-left: 1px solid #648ac3; }
+.ports span { border-left: 1px solid #648ac3; }
+.diagram-caption { text-align: left; }
+.network { display: grid; align-content: center; text-align: center; padding: 7px; border: 1px solid #d5c2ed; border-radius: 9px; }
+.network .signal { position: relative; border-top: 2px solid #8263b4; margin: 9px 5px 5px 0; }
+.signal::after { content: ""; position: absolute; right: -4px; top: -5px; border: 4px solid transparent; border-left: 6px solid #8263b4; border-right: 0; }
+.network small { font-size: .81rem; }
+.steps { list-style: none; margin: 14px 0 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; counter-reset: step; }
+.step { position: relative; min-width: 0; counter-increment: step; }
+.step h3::before { content: counter(step) "　"; color: var(--blue); font: 700 .9em var(--mono); }
+.step + .step::before { content: ""; position: absolute; width: 8px; top: 20px; left: -9px; border-top: 1px solid #648ac3; }
+.step code { display: block; margin-top: 5px; color: var(--blue); }
+.step .inline-key { display: inline; }
+.step p { font-size: .93rem; }
+.data-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.data-table th, .data-table td { text-align: left; vertical-align: top; padding: 10px 9px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.data-table thead th { background: #edf3fc; color: var(--blue); font-size: .9rem; }
+.data-table tbody th { font-size: .95rem; }
+.data-table td { font-size: .94rem; }
+.data-table td p { margin-top: 4px; color: var(--muted); }
+.paths col:first-child { width: 23%; }
+.paths col:last-child { width: 20%; }
+.calls col:first-child { width: 23%; }
+.checks col:first-child { width: 22%; }
+.checks col:nth-child(2) { width: 44%; }
+.tag, .tag-amber, .tag-purple { display: inline-block; font-weight: 650; font-size: .84rem; background: var(--green-bg); color: var(--green); padding: 2px 6px; border-radius: 4px; }
+.tag-amber { background: var(--amber-bg); color: var(--amber); }
+.tag-purple { background: var(--purple-bg); color: var(--purple); }
+.decision { display: grid; grid-template-columns: minmax(160px, .35fr) minmax(0, 1fr); gap: 23px; align-items: stretch; margin: 0; }
+.root { background: #193958; color: white; border-radius: 8px; padding: 14px; display: grid; align-content: center; }
+.root p { color: #dbe8f7; font-size: .875rem; }
+.branches { position: relative; list-style: none; display: grid; gap: 8px; margin: 0; padding: 0; }
+.branches::before { content: ""; position: absolute; top: 13%; bottom: 15%; left: -13px; border-left: 1px solid #6289bd; }
+.branches::after { content: ""; position: absolute; width: 11px; left: -23px; top: 50%; border-top: 1px solid #6289bd; }
+.branches li { position: relative; background: #f3f7fd; }
+.branches li::before { position: absolute; content: ""; border-top: 1px solid #6289bd; left: -13px; width: 12px; top: 50%; }
+.branches h3 { color: var(--blue); }
+.sources { margin-top: 16px; color: var(--muted); font-size: .9rem; }
+.sources summary { cursor: pointer; width: fit-content; }
+.sources ul { padding-left: 1.3em; margin-bottom: 0; }
+@media (max-width: 1040px) {
+  .steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .step:nth-child(4)::before { content: none; }
+}
+@media (max-width: 790px) {
+  .topology { grid-template-columns: 1fr; }
+  .network { min-height: 82px; }
+  .network .signal { display: none; }
+  .card-grid { grid-template-columns: 1fr; }
+  .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .step:nth-child(4)::before { content: ""; }
+  .step:nth-child(odd)::before { content: none; }
+}
+@media (max-width: 570px) {
+  .header-inner { gap: 8px; }
+  .site-header a { font-size: .75rem; }
+  .layout { grid-template-columns: clamp(86px, 24vw, 124px) minmax(0, 1fr); gap: 8px; }
+  .toc { padding: 8px 4px; border-radius: 8px; }
+  .toc h2 { margin: 0 4px 6px; }
+  .toc a { padding: 6px 4px; font-size: .78rem; }
+  .chapter { border-radius: 8px; }
+  .chapter-header { margin-bottom: 12px; }
+  .steps, .decision { grid-template-columns: 1fr; gap: 8px; }
+  .step::before, .branches::before, .branches::after, .branches li::before { display: none; }
+  .data-table { display: block; }
+  .data-table colgroup { display: none; }
+  .data-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .data-table tbody, .data-table tr, .data-table th, .data-table td { display: block; }
+  .data-table tbody tr { border-bottom: 1px solid var(--line); padding-block: 7px; }
+  .data-table tbody th, .data-table td { border: 0; padding: 2px 0; }
+}
+@media print {
+  body { background: white; }
+  .site-header { background: white; color: var(--ink); }
+  .site-header a, aside { display: none; }
+  .layout { display: block; }
+  .chapter[hidden] { display: block; }
+  .chapter { break-inside: avoid; }
+}
+  </style>
 </head>
 <body>
-<main>
-<a class="back-home" href="../../">技术笔记首页</a>
-<header>
-  <div><div class="kicker">GPU 通信路径</div><h1>一个 Tensor 怎么走？</h1><p>选择一条路径，查看 Tensor 经过的设备和对应源码。发送端和接收端的 GDR 可以独立切换。</p></div>
-  <div class="version">PyTorch 2.9.0 / NCCL 2.27.7-1</div>
-</header>
-<div class="workbench">
-  <aside class="panel rail" aria-label="传输分支">
-    <h2>NCCL 连接怎么选</h2>
-    <p class="subtitle"><a href="https://github.com/NVIDIA/nccl/blob/v2.27.7-1/src/transport.cc#L14" target="_blank" rel="noopener"><code>selectTransport()</code></a> 按连接检查 P2P → SHM → NET 等传输。同一次通信可以混用多条路径。</p>
-    <div class="trees">
-      <section class="tree-section">
-        <h3 class="tree-root">同机 GPU ↔ GPU</h3>
-        <div class="tree-group">
-          <span class="branch-label">P2P 可用</span>
-          <button class="branch" type="button" data-route="nvlink">NVLink / NVSwitch</button>
-          <button class="branch" type="button" data-route="pcie">PCIe Switch</button>
-          <span class="branch-label">P2P 未选中 · SHM 可用</span>
-          <button class="branch" type="button" data-route="shm">主机共享内存</button>
-        </div>
-      </section>
-      <section class="tree-section">
-        <h3 class="tree-root">跨机 GPU ↔ GPU</h3>
-        <div class="tree-group">
-          <span class="branch-label">NET · IB / RoCE</span>
-          <button class="branch" type="button" data-route="rdma">GPU 直连网卡</button>
-          <button class="branch" type="button" data-route="host">主机内存中转</button>
-          <span class="branch-label">NET · Socket</span>
-          <button class="branch" type="button" data-route="socket">TCP/IP 传输</button>
-        </div>
-      </section>
-      <section class="tree-section">
-        <h3 class="tree-root">同机 CPU ↔ GPU · CUDA</h3>
-        <div class="tree-group">
-          <button class="branch" type="button" data-route="h2d">PCIe 拷贝</button>
-          <button class="branch" type="button" data-route="c2c">GH200 NVLink-C2C</button>
-        </div>
-      </section>
+  <header class="site-header">
+    <div class="header-inner">
+      <h1>GPU 多卡互联与 RDMA</h1>
+      <a href="../../">技术笔记首页</a>
     </div>
-  </aside>
-  <div class="output">
-    <section class="diagram" aria-labelledby="route-title">
-      <div class="diagram-top"><div><h2 id="route-title" aria-live="polite"></h2><p class="subtitle" id="route-intro"></p></div></div>
-      <fieldset id="gdr-controls" class="gdr-controls" hidden>
-        <legend>网卡直接访问显存</legend>
-        <label><input id="send-gdr" type="checkbox" checked> 发送端</label>
-        <label><input id="recv-gdr" type="checkbox" checked> 接收端</label>
-      </fieldset>
-      <div id="track" class="track" aria-label="Tensor 数据路径"></div>
-      <p id="route-caption" class="caption"></p>
-    </section>
-    <section class="panel calls" aria-labelledby="calls-title">
-      <div class="calls-top">
-        <h2 id="calls-title">对应的函数入口</h2>
-        <div class="switcher" role="group" aria-label="训练通信操作">
-          <button type="button" data-op="ep">EP All-to-All</button>
-          <button type="button" data-op="tp">TP AllReduce</button>
+  </header>
+  <div class="layout">
+    <aside>
+      <nav class="toc" aria-labelledby="toc-title">
+        <h2 id="toc-title">目录</h2>
+        <ul>
+          <li><a href="#topology">硬件拓扑</a></li>
+          <li><a href="#rdma">RDMA 工作原理</a></li>
+          <li><a href="#paths">跨机数据路径</a></li>
+          <li><a href="#transport">NCCL 传输选择</a></li>
+          <li><a href="#calls">软件调用链</a></li>
+          <li><a href="#validation">配置与验证</a></li>
+        </ul>
+      </nav>
+    </aside>
+    <main id="chapters">
+      <section class="chapter" id="topology" aria-labelledby="topology-title">
+        <header class="chapter-header">
+          <h2 id="topology-title">硬件拓扑决定有哪些路可走</h2>
+          <p class="intro">拓扑描述 GPU、CPU、网卡和交换芯片如何连接。沿着路径可以看出经过几级交换、是否跨 NUMA、哪些设备共用链路。下图是两台服务器的示意，每台只画出 CPU 0 下的 PCIe 设备。</p>
+        </header>
+        <figure class="topology" aria-label="两台服务器的 PCIe 拓扑与跨机网络">
+          <div class="node">
+            <h3>节点 A</h3>
+            <div class="cpu-pair"><span class="device">CPU 0 + DRAM</span><span class="numa">NUMA</span><span class="device">CPU 1 + DRAM</span></div>
+            <span class="pcie-root">CPU 0 的 PCIe Root Complex</span>
+            <div class="device switch">PCIe Switch</div>
+            <div class="ports" aria-hidden="true"><span></span><span></span><span></span></div>
+            <div class="endpoints"><span class="device">GPU A0</span><span class="device">GPU A1</span><span class="device">网卡 A</span></div>
+            <p class="diagram-caption">A0 与 A1 可另走 NVLink / NVSwitch。</p>
+          </div>
+          <div class="network purple">
+            <h3>IB / RoCE 网络</h3>
+            <span class="signal" aria-hidden="true"></span>
+            <small>网卡 A → 交换机 → 网卡 B</small>
+          </div>
+          <div class="node">
+            <h3>节点 B</h3>
+            <div class="cpu-pair"><span class="device">CPU 0 + DRAM</span><span class="numa">NUMA</span><span class="device">CPU 1 + DRAM</span></div>
+            <span class="pcie-root">CPU 0 的 PCIe Root Complex</span>
+            <div class="device switch">PCIe Switch</div>
+            <div class="ports" aria-hidden="true"><span></span><span></span><span></span></div>
+            <div class="endpoints"><span class="device">网卡 B</span><span class="device">GPU B0</span><span class="device">GPU B1</span></div>
+            <p class="diagram-caption">B0 与 B1 可另走 NVLink / NVSwitch。</p>
+          </div>
+        </figure>
+        <div class="card-grid">
+          <div class="card blue"><h3>CPU ↔ GPU</h3><p>常见分立 GPU 经 PCIe。GH200 的 Grace ↔ Hopper 经 NVLink-C2C，支持一致性内存访问。</p></div>
+          <div class="card green"><h3>同机 GPU ↔ GPU</h3><p>可经 PCIe P2P、NVLink 直连或 NVSwitch。交换芯片按目标端口转发。</p></div>
+          <div class="card purple"><h3>跨机 GPU ↔ GPU</h3><p>常见路径包含本机 GPU ↔ 网卡、IB / RoCE 网络、对端网卡 ↔ GPU 三段。</p></div>
         </div>
-      </div>
-      <ol class="call-chain" id="call-chain"></ol>
-      <div class="notes">
-        <div><h3 id="setup-title">连接建立</h3><p id="setup"></p></div>
-        <div><h3 id="move-title">执行数据传输</h3><p id="move"></p></div>
-      </div>
-    </section>
+        <div class="note"><p><strong>共享带宽</strong>　同一颗 PCIe Switch 下的 GPU 与网卡可以在支持时直接 P2P。多个下行设备同时访问主机内存时，可能共用 Switch 上行链路。</p></div>
+      </section>
+
+      <section class="chapter" id="rdma" aria-labelledby="rdma-title">
+        <header class="chapter-header">
+          <h2 id="rdma-title">RDMA 让网卡直接访问远端缓冲区</h2>
+          <p class="intro">一次 RDMA Write 从准备缓冲区开始，经过连接建立、提交、搬运和完成同步。</p>
+        </header>
+        <div class="card-grid">
+          <div class="card blue"><h3>DMA · 本机</h3><p>设备按命令读写本机内存。例如网卡用 DMA 从 DRAM 读取待发数据。</p></div>
+          <div class="card purple"><h3>RDMA · 跨机</h3><p>网卡执行读写请求，按对端授权访问已注册的内存。InfiniBand 和 RoCE 都可承载 RDMA。</p></div>
+          <div class="card green"><h3>GPUDirect RDMA · GPU 显存</h3><p>通信库可以把 GPU 显存注册给网卡，网卡即可通过本机 PCIe 直接读取或写入它。</p></div>
+        </div>
+        <ol class="steps">
+          <li class="card step"><h3>注册缓冲区</h3><code>ibv_reg_mr()</code><p>注册地址范围和访问权限，得到内存区域（MR）。</p></li>
+          <li class="card step"><h3>建立连接</h3><code>ibv_create_qp()</code><p>建立和配置队列对（QP），交换远端缓冲区地址和访问钥匙 <code class="inline-key">rkey</code>。</p></li>
+          <li class="card step"><h3>提交写请求</h3><code>ibv_post_send()</code><p>提供本地地址、lkey、长度、远端地址和 rkey。</p></li>
+          <li class="card step purple"><h3>网卡搬数据</h3><p>源网卡 DMA 读，经网络送到目标网卡。目标网卡校验权限后 DMA 写。</p></li>
+          <li class="card step green"><h3>完成与同步</h3><code>ibv_poll_cq()</code><p>查询请求完成。接收端按协议获知何时可以消费数据，并与 GPU stream 协调。</p></li>
+        </ol>
+        <div class="note"><p><strong>CPU 的角色</strong>　应用或通信库负责注册、提交与协调，Tensor 字节由设备搬运。普通 RDMA Write 需要协议配合，才能通知接收应用何时读取。</p></div>
+      </section>
+
+      <section class="chapter" id="paths" aria-labelledby="paths-title">
+        <header class="chapter-header">
+          <h2 id="paths-title">同一个跨机 Tensor 可以走不同路径</h2>
+          <p class="intro">节点 A 的 GPU A0 发给节点 B 的 GPU B0。网卡之间保持 RDMA 时，两端仍可分别决定是否经过主机内存。</p>
+        </header>
+        <table class="data-table paths">
+          <colgroup><col><col><col></colgroup>
+          <thead><tr><th scope="col">传输方式</th><th scope="col">Tensor 数据路径</th><th scope="col">主机内存中转</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">双端 GPUDirect RDMA</th><td><code>GPU A0 → 网卡 A → IB/RoCE → 网卡 B → GPU B0</code></td><td><span class="tag">无中转</span></td></tr>
+            <tr><th scope="row">仅发送端 GPUDirect</th><td><code>GPU A0 → 网卡 A → IB/RoCE → 网卡 B → 主机 B → GPU B0</code></td><td><span class="tag-amber">接收端中转</span></td></tr>
+            <tr><th scope="row">仅接收端 GPUDirect</th><td><code>GPU A0 → 主机 A → 网卡 A → IB/RoCE → 网卡 B → GPU B0</code></td><td><span class="tag-amber">发送端中转</span></td></tr>
+            <tr><th scope="row">RDMA 经主机内存</th><td><code>GPU A0 → 主机 A → 网卡 A → IB/RoCE → 网卡 B → 主机 B → GPU B0</code></td><td><span class="tag-purple">双端中转</span></td></tr>
+            <tr><th scope="row">TCP Socket</th><td><code>GPU A0 → 主机 A → TCP/IP → 主机 B → GPU B0</code></td><td><span class="tag-amber">双端中转</span></td></tr>
+          </tbody>
+        </table>
+        <div class="note"><p><strong>例子</strong>　双端 GDR 时，源网卡经本机 PCIe 读取 GPU A0 的显存，对端网卡经自己的 PCIe 路径写入 GPU B0 的显存。</p></div>
+      </section>
+
+      <section class="chapter" id="transport" aria-labelledby="transport-title">
+        <header class="chapter-header">
+          <h2 id="transport-title">NCCL 按连接选择传输</h2>
+          <p class="intro">训练框架划分 rank 组。NCCL 根据拓扑和可用能力组织 channel，为每条收发连接设置传输。</p>
+        </header>
+        <figure class="decision" aria-label="NCCL 的 P2P、共享内存和网络传输选择">
+          <div class="root"><h3><code>selectTransport()</code></h3><p>检查传输的 <code>canConnect()</code>，选中后执行对应的 <code>setup()</code>。</p></div>
+          <ol class="branches">
+            <li class="card"><h3>P2P 可用</h3><p><code>p2pCanConnect()</code> → <code>p2pSendSetup()</code> / <code>p2pRecvSetup()</code>。GPU 互访通常经 NVLink 或 PCIe。</p></li>
+            <li class="card"><h3>P2P 未选中，SHM 可用</h3><p><code>shmCanConnect()</code> → <code>shmSendSetup()</code> / <code>shmRecvSetup()</code>。两张卡使用共享主机缓冲区。</p></li>
+            <li class="card"><h3>P2P 和 SHM 未选中，NET 可用</h3><p>IB / RoCE 等后端可分别检查发送端和接收端的 GDR。Socket 使用主机缓冲区。</p></li>
+          </ol>
+        </figure>
+        <div class="note"><p><strong>按连接选</strong>　同一次 All-to-All 可以在机内连接上走 P2P，在跨机连接上走 NET。平台专用传输和网络插件可以改变具体路径。</p></div>
+      </section>
+
+      <section class="chapter" id="calls" aria-labelledby="calls-title">
+        <header class="chapter-header">
+          <h2 id="calls-title">从训练接口追到网卡提交函数</h2>
+          <p class="intro">源码示例使用 Megatron Core 0.16、PyTorch 2.9.0 和 NCCL 2.27.7-1，涉及训练提交、连接建立和数据传输三个阶段。</p>
+        </header>
+        <table class="data-table calls">
+          <colgroup><col><col></colgroup>
+          <thead><tr><th scope="col">操作或阶段</th><th scope="col">入口与调用</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">TP AllReduce</th><td><code>Megatron _reduce() → dist.all_reduce() → ProcessGroupNCCL::allreduce() → ncclAllReduce()</code></td></tr>
+            <tr><th scope="row">EP All-to-All</th><td><code>all_to_all() → dist.all_to_all_single() → ProcessGroupNCCL::alltoall_base()</code><p>按构建与分片形态走原生 All-to-All，或分组提交 <code>ncclSend()</code> 与 <code>ncclRecv()</code>。</p></td></tr>
+            <tr><th scope="row">NET 连接建立</th><td><code>sendSetup() / recvSetup() → ncclTopoGetNetDev() → ncclTopoCheckGdr()</code><p>NCCL 内置 IB 后端经 <code>regMr</code> 或 <code>regMrDmaBuf</code> 注册网卡使用的缓冲区。</p></td></tr>
+            <tr><th scope="row">IB / RoCE 提交数据</th><td><code>ncclIbIsend() → ncclIbMultiSend() → wrap_ibv_post_send()</code><p>此实现用 RDMA Write 类请求。CUDA stream 依赖和接收完成由通信库协调。</p></td></tr>
+          </tbody>
+        </table>
+        <details class="sources">
+          <summary>查看对应源码</summary>
+          <ul>
+            <li><a href="https://github.com/NVIDIA/Megatron-LM/blob/core_r0.16.0/megatron/core/tensor_parallel/mappings.py">Megatron Core 的 TP 和 All-to-All 入口</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/blob/v2.9.0/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp">PyTorch ProcessGroupNCCL</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/blob/v2.9.0/torch/csrc/cuda/nccl.cpp#L831">PyTorch 的 All-to-All 提交</a></li>
+            <li><a href="https://github.com/NVIDIA/nccl/blob/v2.27.7-1/src/transport.cc#L14">NCCL 传输选择</a></li>
+            <li><a href="https://github.com/NVIDIA/nccl/blob/v2.27.7-1/src/transport/net.cc#L196">NCCL 网卡选择和 GDR 检查</a></li>
+            <li><a href="https://github.com/NVIDIA/nccl/blob/v2.27.7-1/src/transport/net_ib.cc#L2111">NCCL 内置 IB 后端</a></li>
+          </ul>
+        </details>
+      </section>
+
+      <section class="chapter" id="validation" aria-labelledby="validation-title">
+        <header class="chapter-header">
+          <h2 id="validation-title">从机器配置到实际验证</h2>
+          <p class="intro">从 GPU 互访能力查到实际训练选用的网卡和传输。能测通主机内存上的 RDMA 后，再单独确认网卡能否直接访问显存。</p>
+        </header>
+        <table class="data-table checks">
+          <colgroup><col><col><col></colgroup>
+          <thead><tr><th scope="col">检查项</th><th scope="col">命令或工具</th><th scope="col">核对内容</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">看硬件拓扑</th><td><code>nvidia-smi topo -m</code>、<code>lspci -tv</code></td><td>确认 GPU ↔ GPU、GPU ↔ NIC 的路径和 NUMA。</td></tr>
+            <tr><th scope="row">测同机 P2P</th><td><code>nvidia-smi topo -p2p p</code>、<code>nvbandwidth</code></td><td>核对 P2P 能力，再实测 GPU 互访带宽。</td></tr>
+            <tr><th scope="row">测跨机 RDMA</th><td><code>rdma link</code>、<code>ibv_devinfo</code>、<code>ib_write_bw</code></td><td>先测主机缓冲区，再用支持 CUDA 的 perftest 测 GPU 缓冲区。</td></tr>
+            <tr><th scope="row">复现训练通信</th><td><code>NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT,NET,GRAPH</code></td><td>核对网卡和传输，再用相同 GPU 分组的 NCCL Tests 实测。</td></tr>
+          </tbody>
+        </table>
+        <div class="note"><p><strong>配置归属</strong>　整机布线决定硬件拓扑。宿主机驱动和平台所需的 Fabric Manager / NVLSM 初始化互联。网卡驱动、IB / RoCE 网络以及 DMA-BUF 或 <code>nvidia-peermem</code> 支撑 GDR。</p></div>
+        <details class="sources">
+          <summary>查看 NVIDIA 参考文档</summary>
+          <ul>
+            <li><a href="https://docs.nvidia.com/deploy/nvidia-smi/index.html">nvidia-smi 拓扑命令</a></li>
+            <li><a href="https://docs.nvidia.com/cuda/gpudirect-rdma/index.html">GPUDirect RDMA</a></li>
+            <li><a href="https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/troubleshooting.html">NCCL 排查指南</a></li>
+            <li><a href="https://docs.nvidia.com/datacenter/tesla/fabric-manager-user-guide/">Fabric Manager</a></li>
+            <li><a href="https://github.com/NVIDIA/nccl-tests">NCCL Tests</a></li>
+          </ul>
+        </details>
+      </section>
+    </main>
   </div>
-</div>
-<footer>
-  <details>
-    <summary>版本和源码参考</summary>
-    <p>示意图追踪一对 rank。NCCL 可以按 channel 和收发方向使用不同连接。图中列出常见传输分支，其他网络插件及平台专用路径也可能参与。C2C 和 PCIe 拷贝是独立的 CUDA 场景。</p>
-    <ul id="sources"></ul>
-  </details>
-</footer>
-</main>
-<script>
-const nccl = "https://github.com/NVIDIA/nccl/blob/v2.27.7-1/src/";
-const torch = "https://github.com/pytorch/pytorch/blob/v2.9.0/torch/csrc/";
-const megatron = "https://github.com/NVIDIA/Megatron-LM/blob/core_r0.16.0/megatron/core/tensor_parallel/mappings.py";
-const cuda = "https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__MEMORY.html";
-const cudaPeer = "https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__PEER.html";
-const grace = "https://developer.nvidia.com/blog/nvidia-gh200-superchip-delivers-breakthrough-energy-efficiency-and-node-consolidation-for-apache-spark/";
-const gdrDoc = "https://docs.nvidia.com/cuda/gpudirect-rdma/index.html";
+  <script>
+    const chapters = [...document.querySelectorAll("main > .chapter")];
+    const contents = [...document.querySelectorAll(".toc a")];
 
-function api(name, url) {
-  return '<a href="' + url + '" target="_blank" rel="noopener"><code>' + name + '</code></a>';
-}
-function gpu(label) { return ["gpu", label, "GPU 显存 · HBM"]; }
-function host(label, detail) { return ["memory", label, detail]; }
-function hw(label, detail) { return ["hardware", label, detail]; }
+    function showChapter() {
+      const active = chapters.find(chapter => "#" + chapter.id === location.hash) ?? chapters[0];
+      for (const chapter of chapters) {
+        chapter.hidden = chapter !== active;
+      }
+      for (const link of contents) {
+        if (link.hash === "#" + active.id) {
+          link.setAttribute("aria-current", "location");
+        } else {
+          link.removeAttribute("aria-current");
+        }
+      }
+    }
 
-const p2pSetup = api("ncclTransportP2pSetup()", nccl + "transport.cc#L103") + ' → ' +
-  api("selectTransport()", nccl + "transport.cc#L23") + ' → ' +
-  api("p2pCanConnect()", nccl + "transport/p2p.cc#L123") + ' → ' +
-  api("p2pSendSetup()", nccl + "transport/p2p.cc#L360") + ' / ' +
-  api("p2pRecvSetup()", nccl + "transport/p2p.cc#L430") + '。';
-const p2pMove = '通信 kernel 可使用已映射的对端 GPU 缓冲区。独立验证 GPU 互访能力可用 ' +
-  api("cudaDeviceCanAccessPeer()", cudaPeer) + '。';
-const netSetup = api("sendSetup()", nccl + "transport/net.cc#L196") + ' / ' +
-  api("recvSetup()", nccl + "transport/net.cc#L238") +
-  ' 各自选网卡、调用 ' + api("ncclTopoCheckGdr()", nccl + "graph/paths.cc#L395") +
-  '。IB/RoCE 后端通过 <code>regMr</code> 或 <code>regMrDmaBuf</code> 注册相应缓冲区。';
-const ibMove = api("ncclIbIsend()", nccl + "transport/net_ib.cc#L2111") + ' → ' +
-  api("ncclIbMultiSend()", nccl + "transport/net_ib.cc#L1985") + ' → ' +
-  api("wrap_ibv_post_send()", nccl + "transport/net_ib.cc#L2095") +
-  '。这一实现用 RDMA Write 类型的请求传输数据。';
-
-const routes = {
-  nvlink: {
-    title: "GPU P2P 经 NVLink",
-    intro: "示例为带 NVSwitch 的单机。两卡直连时，中间只需 NVLink。",
-    left: [gpu("GPU 0")], right: [gpu("GPU 1")],
-    bridge: ["NVLink", "经 NVSwitch 转发"],
-    caption: "NVLink 提供链路，NVSwitch 把数据转发到目标 GPU。Tensor 可在两张 GPU 的显存之间直接传输。",
-    setup: p2pSetup, move: p2pMove
-  },
-  pcie: {
-    title: "GPU P2P 经 PCIe Switch",
-    intro: "示例为两张 GPU 接在同一颗 PCIe Switch，且允许直接 P2P。",
-    left: [gpu("GPU 0")], right: [gpu("GPU 1")],
-    bridge: ["PCIe", "经 PCIe Switch 转发"],
-    caption: "PCIe Switch 负责把请求转发到目标卡。NCCL 这一层仍然选的是 P2P，物理链路换成了 PCIe。",
-    setup: p2pSetup, move: p2pMove
-  },
-  shm: {
-    title: "同机经过共享主机内存",
-    intro: "当 P2P 未选中且 SHM 可用，NCCL 可以走共享内存。",
-    left: [gpu("GPU 0")], right: [gpu("GPU 1")],
-    bridge: ["共享主机内存", "经本机 PCIe 路径"],
-    caption: "中间缓冲区位于主机内存，两张 GPU 通过它交换数据。SHM 也不可用时，同机连接仍可能选择 NET。",
-    setup: api("shmCanConnect()", nccl + "transport/shm.cc#L75") + ' → ' +
-      api("shmSendSetup()", nccl + "transport/shm.cc#L101") + ' / ' +
-      api("shmRecvSetup()", nccl + "transport/shm.cc#L132") + '。',
-    move: 'NCCL 使用已映射的共享主机缓冲区。GPU 侧传输方式取决于协议和配置。'
-  },
-  rdma: {
-    title: "跨机走 GPUDirect RDMA",
-    intro: "本机 GPU 到网卡、网卡到对端、对端网卡到 GPU 是三段不同的路径。",
-    bridge: ["IB / RoCE", "网卡之间走 RDMA"],
-    setup: netSetup, move: ibMove
-  },
-  host: {
-    title: "跨机 RDMA 经主机内存中转",
-    intro: "两端网卡仍走 RDMA，网卡操作的缓冲区位于主机内存。",
-    bridge: ["IB / RoCE", "网卡之间走 RDMA"],
-    setup: netSetup, move: ibMove
-  },
-  socket: {
-    title: "跨机走 TCP Socket",
-    intro: "当 NCCL 选用 Socket 网络后端，主机缓冲区通过 TCP/IP 收发。",
-    bridge: ["TCP/IP", "网卡之间走以太网"],
-    caption: "GPU 与主机缓冲区之间各有一次搬运。Socket 后端发送和接收的是主机缓冲区中的数据。",
-    setup: api("sendSetup()", nccl + "transport/net.cc#L196") + ' / ' +
-      api("recvSetup()", nccl + "transport/net.cc#L238") + ' 使用所选的 NET 后端建立连接。',
-    move: api("ncclNetSocketIsend()", nccl + "transport/net_socket.cc#L644") + ' / ' +
-      api("ncclNetSocketIrecv()", nccl + "transport/net_socket.cc#L655") + ' 在 Socket 后端提交收发请求。'
-  },
-  h2d: {
-    title: "主机内存经 PCIe 拷到 GPU",
-    intro: "例如把加载到主机内存中的权重传给 GPU。",
-    left: [host("主机内存", "模型权重")], right: [gpu("GPU 0")],
-    bridge: ["PCIe", "经 PCIe Root Complex"],
-    caption: "图中展示 HostToDevice 方向。GPU 写回主机内存的对应方向是 DeviceToHost。",
-    setup: '应用准备 host 和 device 缓冲区。使用页锁定主机内存可以支持典型的异步拷贝和计算重叠。',
-    move: api("cudaMemcpyAsync()", cuda) + ' 指定 <code>cudaMemcpyHostToDevice</code> 和 CUDA stream。'
-  },
-  c2c: {
-    title: "Grace CPU ↔ Hopper GPU",
-    intro: "GH200 通过 NVLink-C2C 连接 CPU 和 GPU，支持一致性内存访问。",
-    left: [host("Grace LPDDR", "CPU 侧内存")], right: [["gpu", "Hopper GPU", "GPU kernel 读取主机地址"]],
-    bridge: ["NVLink-C2C", "CPU ↔ GPU"],
-    caption: "Hopper 可以读取可访问的 Grace 内存。图中箭头表示 GPU 读取时，数据从 Grace 内存流向 Hopper。",
-    setup: '应用把可访问的主机地址传给 GPU kernel。这里使用支持系统内存直接访问的 GH200 平台作为示例。',
-    move: 'CUDA kernel 对该地址执行普通 load，由 NVLink-C2C 完成数据传输。' +
-      api("GH200 架构说明", grace) + '。'
-  }
-};
-
-const ops = {
-  ep: [
-    ["Megatron", "all_to_all()", megatron + "#L535"],
-    ["PyTorch", "dist.all_to_all_single()", "https://pytorch.org/docs/2.9/distributed.html#torch.distributed.all_to_all_single"],
-    ["C++ 后端", "ProcessGroupNCCL::alltoall_base()", torch + "distributed/c10d/ProcessGroupNCCL.cpp#L5143"],
-    ["NCCL · 构建决定", "ncclSend() + ncclRecv()", torch + "cuda/nccl.cpp#L831", "通过 ncclGroupStart / End 分组，或调用原生 AllToAll(v)"]
-  ],
-  tp: [
-    ["Megatron", "_reduce()", megatron + "#L22"],
-    ["PyTorch", "dist.all_reduce()", "https://pytorch.org/docs/2.9/distributed.html#torch.distributed.all_reduce"],
-    ["C++ 后端", "ProcessGroupNCCL::allreduce()", torch + "distributed/c10d/ProcessGroupNCCL.cpp#L4374"],
-    ["NCCL", "ncclAllReduce()", "https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/colls.html#ncclallreduce"]
-  ],
-  h2d: [
-    ["应用", "提交 H2D 拷贝"],
-    ["CUDA Runtime", "cudaMemcpyAsync()", cuda],
-    ["拷贝方向", "cudaMemcpyHostToDevice", cuda],
-    ["硬件", "PCIe → GPU 显存"]
-  ],
-  c2c: [
-    ["应用", "准备可访问的地址"],
-    ["CUDA", "启动 GPU kernel"],
-    ["GPU 指令", "load 主机内存"],
-    ["硬件", "NVLink-C2C", grace]
-  ]
-};
-
-const routeButtons = [...document.querySelectorAll("[data-route]")];
-const opButtons = [...document.querySelectorAll("[data-op]")];
-const controls = document.querySelector("#gdr-controls");
-const sendControl = document.querySelector("#send-gdr");
-const recvControl = document.querySelector("#recv-gdr");
-const switcher = document.querySelector(".switcher");
-const track = document.querySelector("#track");
-let selected = "rdma";
-let operation = "ep";
-
-function zone(label, nodes) {
-  const path = nodes.map(([kind, name, detail]) =>
-    '<div class="node ' + kind + '"><i class="glyph" aria-hidden="true"></i><div>' +
-    name + '<small>' + detail + '</small></div></div>'
-  ).join('<div class="step-arrow" aria-hidden="true"></div>');
-  return '<div class="zone"><div class="zone-title">' + label + '</div>' + path + '</div>';
-}
-
-function netNodes(direct, sending) {
-  const accelerator = gpu(sending ? "GPU 0" : "GPU 3");
-  const nic = hw(sending ? "发送网卡" : "接收网卡", direct ? "PCIe · 访问显存" : "DMA · 访问主机内存");
-  const nodes = direct ? [accelerator, nic] :
-    [accelerator, host("主机缓冲区", "GPU ↔ 主机内存"), nic];
-  return nodes;
-}
-
-function render() {
-  const route = routes[selected];
-  const network = ["rdma", "host", "socket"].includes(selected);
-  const isCuda = ["h2d", "c2c"].includes(selected);
-  const sendDirect = selected !== "socket" && sendControl.checked;
-  const recvDirect = selected !== "socket" && recvControl.checked;
-  const left = network ? netNodes(sendDirect, true) : route.left;
-  const right = network ? netNodes(recvDirect, false) : route.right;
-  const title = selected === "rdma" && sendDirect !== recvDirect ? "跨机 RDMA · 单端直连显存" : route.title;
-  document.querySelector("#route-title").textContent = title;
-  document.querySelector("#route-intro").textContent = route.intro;
-  controls.hidden = !network || selected === "socket";
-  switcher.hidden = isCuda;
-  const [link, detail] = route.bridge;
-  track.classList.toggle("network", network);
-  track.innerHTML = zone(network ? "节点 A · 发送" : "本机 · 源", left) +
-    '<div class="bridge"><b>' + link + '</b><div class="bridge-wire" aria-hidden="true"></div><span>' +
-    detail + '</span></div>' + zone(network ? "节点 B · 接收" : "本机 · 目标", right);
-  const nicCaption = sendDirect && recvDirect ?
-    "两端网卡都直接访问显存。GPU 与网卡之间可以经过 PCIe Switch，两端都省去主机内存中转。" :
-    sendDirect || recvDirect ?
-      (sendDirect ? "发送端网卡直读 GPU 显存，接收端经过主机内存。" :
-        "发送端经过主机内存，接收端网卡直写 GPU 显存。") :
-      "发送端 GPU 先把数据送到主机缓冲区，接收端网卡写入主机缓冲区后再送到 GPU。";
-  document.querySelector("#route-caption").textContent = route.caption || nicCaption;
-  document.querySelector("#call-chain").innerHTML = ops[isCuda ? selected : operation].map(
-    ([layer, name, url, extra]) => '<li><span>' + layer + '</span>' +
-      (url ? api(name, url) : '<code>' + name + '</code>') +
-      (extra ? '<span>' + extra + '</span>' : '') + '</li>'
-  ).join("");
-  document.querySelector("#setup-title").textContent = isCuda ? "内存访问准备" : "连接建立";
-  document.querySelector("#setup").innerHTML = route.setup;
-  document.querySelector("#move").innerHTML = route.move;
-  routeButtons.forEach(button => button.setAttribute("aria-pressed", String(button.dataset.route === selected)));
-  opButtons.forEach(button => button.setAttribute("aria-pressed", String(button.dataset.op === operation)));
-}
-
-routeButtons.forEach(button => button.addEventListener("click", () => {
-  selected = button.dataset.route;
-  if (selected === "rdma" || selected === "host") {
-    sendControl.checked = recvControl.checked = selected === "rdma";
-  }
-  render();
-}));
-for (const control of [sendControl, recvControl]) {
-  control.addEventListener("change", () => {
-    selected = sendControl.checked || recvControl.checked ? "rdma" : "host";
-    render();
-  });
-}
-opButtons.forEach(button => button.addEventListener("click", () => {
-  operation = button.dataset.op;
-  render();
-}));
-
-document.querySelector("#sources").innerHTML = [
-  ["NCCL 传输选择", nccl + "transport.cc"],
-  ["PyTorch NCCL 实现", torch + "cuda/nccl.cpp"],
-  ["NVIDIA GPUDirect RDMA", gdrDoc],
-  ["NVIDIA GH200", grace]
-].map(([name, url]) => '<li><a href="' + url + '" target="_blank" rel="noopener">' + name + '</a></li>').join("");
-render();
-</script>
+    showChapter();
+    window.addEventListener("hashchange", () => {
+      showChapter();
+      window.scrollTo(0, 0);
+    });
+  </script>
 </body>
 </html>
