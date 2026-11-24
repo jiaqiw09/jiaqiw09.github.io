@@ -11,6 +11,12 @@ description: Create, redraw, review, and publish self-contained HTML technical d
 - Before changing arrows, inventory each connector in the original reference by stage, endpoints, direction, and line style. Include small arrows inside a card, dashed comparison lines, and crossed arrows. Preserve their count, route, and direction. A crossed four-headed connector stays crossed. Parallel arrows represent a different drawing.
 - When fixing a redraw, compare against the original source as well as the current HTML. Verify each arrow at the card or row where it belongs.
 
+## Group related content into cards
+
+- Follow the section-card hierarchy used in `notes/gpu-rdma/index.html` and `notes/ulysses-sp/index.html`. Give major sections their own white cards with light borders, rounded corners, and enough space between sections.
+- For a multi-rank workflow, put each numbered step in one outer card. Keep the operation title in its header and the corresponding lanes, explanations and arrows together below it. Use inner cards for distinct examples or rank data.
+- Use one step number per group and leave visual separation around arrows. Keep labels, code and examples in their original stage.
+
 ## Use a restrained palette
 
 - Keep the HTML diagram and its PNG export on an opaque white canvas (`#fff`). Use dark navy text, muted blue for arrows and key labels, and blue-gray borders and tints.
