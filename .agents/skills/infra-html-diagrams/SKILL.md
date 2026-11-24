@@ -1,29 +1,24 @@
 ---
 name: infra-html-diagrams
-description: Create or revise the self-contained HTML technical diagrams on infra杂谈, including reproductions of supplied diagrams, communication flows, and new chapters for this GitHub Pages repository. Use when asked to draw, redraw, or publish an HTML diagram here.
+description: Create, redraw, review, and publish self-contained HTML technical diagrams on infra杂谈. Use for diagrams reproduced from an image, multi-rank communication flows, visual corrections, and new diagram chapters in this GitHub Pages repository.
 ---
 
 # Infra HTML diagrams
 
-## Preserve the source
+## Preserve content and connections
 
-- When redrawing a supplied diagram, preserve its section order, lane order, labels, formulas, code, shapes, numeric examples, and conclusions. Change their visual presentation only. Treat any technical correction as a separate requested edit.
-- For a localized revision, change the requested elements and compare the resulting diagram with the previous version.
+- For a redraw, preserve the supplied source's section and lane order, labels, formulas, code, tensor shapes, examples, and conclusions. Treat a technical correction as a separate requested edit.
+- Before changing arrows, inventory each connector in the original reference by stage, endpoints, direction, and line style. Include small arrows inside a card, dashed comparison lines, and crossed arrows. Preserve their count, route, and direction. A crossed four-headed connector stays crossed. Parallel arrows represent a different drawing.
+- When fixing a redraw, compare against the original source as well as the current HTML. Verify each arrow at the card or row where it belongs.
 
-## Draw on white
+## Use a restrained palette
 
-- Give the diagram HTML and its PNG export an opaque white canvas (`#fff`). The site shell may have its own background.
-- Use dark navy text and neutral borders. Use blue and green accents with pale tints inside rank cards. For EP, use blue for Rank 0 and green for Rank 1. Use an amber accent for combine or summary blocks when it distinguishes the stage.
-- Keep lane headers and their cards aligned. Use real text for technical details and a monospace font for code, indices, and tensor shapes.
-
-## Draw readable arrows
-
-- Draw graphical arrows with CSS geometry in reserved connector space. Use a thin straight shaft and a consistent chevron head. Align each arrow with the cards it connects. Keep arrows clear of labels, badges, and borders.
-- Use two parallel arrows pointing in opposite directions for simultaneous sends and receives. For rank diagrams, carry the sender's color through its entire route. Use one arrow for a one-way edge. Keep dashed double-ended connectors for comparison annotations.
-- Keep directions explicit in the labels. On narrow widths, stack the lanes in reading order and turn the connector paths to match that order. Check the diagram both as a standalone page and inside the site's narrower content pane.
+- Keep the HTML diagram and its PNG export on an opaque white canvas (`#fff`). Use dark navy text, muted blue for arrows and key labels, and blue-gray borders and tints.
+- Use the same pale tint for equivalent rank cards, with rank names, lane positions, and labels identifying ownership. Use line styles or lightness to distinguish tokens or stages. Add another hue only when the supplied source relies on that color to encode information or the user requests it.
+- Draw connectors with consistent geometric shafts and arrowheads. Reserve space between the connected cards, and align the arrows to their ends. Keep labels and badges readable on narrow screens.
 
 ## Verify and publish
 
-- Keep each diagram in one HTML file with inline styles. Before publishing, render it in a browser and inspect its connector direction, white background, content preservation, and narrow layout. Export a PNG from the same HTML when requested.
-- Put the HTML under `notes/<chapter>/index.html`. Add one matching entry in the homepage's left catalog for a new chapter. Publish only the HTML for each chapter unless asked to include other assets.
-- Keep this skill in `.agents/skills/` and outside site navigation and published pages.
+- Use self-contained HTML with inline styles. Compare the rendered text and numeric examples with the source, and inspect every connector at desktop width, at the site's content-pane width, and when lanes stack. Export the PNG from the final HTML and check that its background is white.
+- Put the chapter at `notes/<chapter>/index.html`. For new chapters, add an entry to the left catalog on the homepage. Publish the HTML and share a separate PNG when requested.
+- Keep this skill under `.agents/skills/` outside the site's catalog and published pages.
