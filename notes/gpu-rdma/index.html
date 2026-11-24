@@ -43,27 +43,17 @@ code { font: 600 .87em/1.5 var(--mono); overflow-wrap: anywhere; }
 }
 .site-header h1 { font-size: clamp(1.22rem, 2.4vw, 1.9rem); letter-spacing: -.035em; }
 .site-header a { color: #d7e5fa; font-size: .875rem; white-space: nowrap; }
-.layout {
-  max-width: 1540px;
+.article {
+  max-width: 1330px;
   margin: auto;
-  padding: clamp(13px, 2.5vw, 38px) clamp(10px, 3.15vw, 52px);
-  display: grid;
-  grid-template-columns: clamp(155px, 17vw, 245px) minmax(0, 1fr);
-  gap: clamp(12px, 2vw, 32px);
-  align-items: start;
+  padding: clamp(10px, 2.5vw, 32px) clamp(10px, 3.15vw, 52px);
 }
-aside { position: sticky; top: 16px; min-width: 0; }
-.toc { border: 1px solid var(--line); background: #fff; border-radius: 12px; padding: 13px 10px; }
-.toc h2 { font-size: .875rem; color: var(--muted); margin: 0 9px 8px; }
-.toc ul { list-style: none; padding: 0; margin: 0; }
-.toc li + li { margin-top: 4px; }
-.toc a { display: block; text-decoration: none; padding: 7px 9px; border-radius: 7px; color: var(--ink); font-size: .92rem; font-weight: 600; }
-.toc a:hover { background: #f0f4fa; }
-.toc a[aria-current="location"] { color: #174378; background: #e6efff; box-shadow: inset 3px 0 #3e6db3; }
-main { min-width: 0; }
+.embedded body { background: transparent; }
+.embedded .site-header a { display: none; }
+.embedded .site-header { border-radius: 12px; }
+.embedded .article { padding: 12px 0 0; }
 .chapter { background: white; border: 1px solid var(--line); padding: clamp(12px, 2.4vw, 34px); border-radius: 14px; scroll-margin-top: 16px; }
-.chapter:not([hidden]) + .chapter:not([hidden]) { margin-top: 14px; }
-.chapter[hidden] { display: none; }
+.chapter + .chapter { margin-top: 14px; }
 .chapter-header { margin-bottom: 19px; }
 .chapter h2 { font-size: clamp(1.24rem, 2.7vw, 2.3rem); letter-spacing: -.035em; }
 .chapter h3 { font-size: 1rem; }
@@ -144,10 +134,6 @@ main { min-width: 0; }
 @media (max-width: 570px) {
   .header-inner { gap: 8px; }
   .site-header a { font-size: .75rem; }
-  .layout { grid-template-columns: clamp(86px, 24vw, 124px) minmax(0, 1fr); gap: 8px; }
-  .toc { padding: 8px 4px; border-radius: 8px; }
-  .toc h2 { margin: 0 4px 6px; }
-  .toc a { padding: 6px 4px; font-size: .78rem; }
   .chapter { border-radius: 8px; }
   .chapter-header { margin-bottom: 12px; }
   .steps, .decision { grid-template-columns: 1fr; gap: 8px; }
@@ -162,12 +148,15 @@ main { min-width: 0; }
 @media print {
   body { background: white; }
   .site-header { background: white; color: var(--ink); }
-  .site-header a, aside { display: none; }
-  .layout { display: block; }
-  .chapter[hidden] { display: block; }
+  .site-header a { display: none; }
   .chapter { break-inside: avoid; }
 }
   </style>
+  <script>
+    if (window.self !== window.top) {
+      document.documentElement.classList.add("embedded");
+    }
+  </script>
 </head>
 <body>
   <header class="site-header">
@@ -176,194 +165,155 @@ main { min-width: 0; }
       <a href="../../">技术笔记首页</a>
     </div>
   </header>
-  <div class="layout">
-    <aside>
-      <nav class="toc" aria-labelledby="toc-title">
-        <h2 id="toc-title">目录</h2>
-        <ul>
-          <li><a href="#topology">硬件拓扑</a></li>
-          <li><a href="#rdma">RDMA 工作原理</a></li>
-          <li><a href="#paths">跨机数据路径</a></li>
-          <li><a href="#transport">NCCL 传输选择</a></li>
-          <li><a href="#calls">软件调用链</a></li>
-          <li><a href="#validation">配置与验证</a></li>
-        </ul>
-      </nav>
-    </aside>
-    <main id="chapters">
-      <section class="chapter" id="topology" aria-labelledby="topology-title">
-        <header class="chapter-header">
-          <h2 id="topology-title">硬件拓扑决定有哪些路可走</h2>
-          <p class="intro">拓扑描述 GPU、CPU、网卡和交换芯片如何连接。沿着路径可以看出经过几级交换、是否跨 NUMA、哪些设备共用链路。下图是两台服务器的示意，每台只画出 CPU 0 下的 PCIe 设备。</p>
-        </header>
-        <figure class="topology" aria-label="两台服务器的 PCIe 拓扑与跨机网络">
-          <div class="node">
-            <h3>节点 A</h3>
-            <div class="cpu-pair"><span class="device">CPU 0 + DRAM</span><span class="numa">NUMA</span><span class="device">CPU 1 + DRAM</span></div>
-            <span class="pcie-root">CPU 0 的 PCIe Root Complex</span>
-            <div class="device switch">PCIe Switch</div>
-            <div class="ports" aria-hidden="true"><span></span><span></span><span></span></div>
-            <div class="endpoints"><span class="device">GPU A0</span><span class="device">GPU A1</span><span class="device">网卡 A</span></div>
-            <p class="diagram-caption">A0 与 A1 可另走 NVLink / NVSwitch。</p>
-          </div>
-          <div class="network purple">
-            <h3>IB / RoCE 网络</h3>
-            <span class="signal" aria-hidden="true"></span>
-            <small>网卡 A → 交换机 → 网卡 B</small>
-          </div>
-          <div class="node">
-            <h3>节点 B</h3>
-            <div class="cpu-pair"><span class="device">CPU 0 + DRAM</span><span class="numa">NUMA</span><span class="device">CPU 1 + DRAM</span></div>
-            <span class="pcie-root">CPU 0 的 PCIe Root Complex</span>
-            <div class="device switch">PCIe Switch</div>
-            <div class="ports" aria-hidden="true"><span></span><span></span><span></span></div>
-            <div class="endpoints"><span class="device">网卡 B</span><span class="device">GPU B0</span><span class="device">GPU B1</span></div>
-            <p class="diagram-caption">B0 与 B1 可另走 NVLink / NVSwitch。</p>
-          </div>
-        </figure>
-        <div class="card-grid">
-          <div class="card blue"><h3>CPU ↔ GPU</h3><p>常见分立 GPU 经 PCIe。GH200 的 Grace ↔ Hopper 经 NVLink-C2C，支持一致性内存访问。</p></div>
-          <div class="card green"><h3>同机 GPU ↔ GPU</h3><p>可经 PCIe P2P、NVLink 直连或 NVSwitch。交换芯片按目标端口转发。</p></div>
-          <div class="card purple"><h3>跨机 GPU ↔ GPU</h3><p>常见路径包含本机 GPU ↔ 网卡、IB / RoCE 网络、对端网卡 ↔ GPU 三段。</p></div>
+  <main class="article" id="chapters">
+    <section class="chapter" id="topology" aria-labelledby="topology-title">
+      <header class="chapter-header">
+        <h2 id="topology-title">硬件拓扑决定有哪些路可走</h2>
+        <p class="intro">拓扑描述 GPU、CPU、网卡和交换芯片如何连接。沿着路径可以看出经过几级交换、是否跨 NUMA、哪些设备共用链路。下图是两台服务器的示意，每台只画出 CPU 0 下的 PCIe 设备。</p>
+      </header>
+      <figure class="topology" aria-label="两台服务器的 PCIe 拓扑与跨机网络">
+        <div class="node">
+          <h3>节点 A</h3>
+          <div class="cpu-pair"><span class="device">CPU 0 + DRAM</span><span class="numa">NUMA</span><span class="device">CPU 1 + DRAM</span></div>
+          <span class="pcie-root">CPU 0 的 PCIe Root Complex</span>
+          <div class="device switch">PCIe Switch</div>
+          <div class="ports" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div class="endpoints"><span class="device">GPU A0</span><span class="device">GPU A1</span><span class="device">网卡 A</span></div>
+          <p class="diagram-caption">A0 与 A1 可另走 NVLink / NVSwitch。</p>
         </div>
-        <div class="note"><p><strong>共享带宽</strong>　同一颗 PCIe Switch 下的 GPU 与网卡可以在支持时直接 P2P。多个下行设备同时访问主机内存时，可能共用 Switch 上行链路。</p></div>
-      </section>
+        <div class="network purple">
+          <h3>IB / RoCE 网络</h3>
+          <span class="signal" aria-hidden="true"></span>
+          <small>网卡 A → 交换机 → 网卡 B</small>
+        </div>
+        <div class="node">
+          <h3>节点 B</h3>
+          <div class="cpu-pair"><span class="device">CPU 0 + DRAM</span><span class="numa">NUMA</span><span class="device">CPU 1 + DRAM</span></div>
+          <span class="pcie-root">CPU 0 的 PCIe Root Complex</span>
+          <div class="device switch">PCIe Switch</div>
+          <div class="ports" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div class="endpoints"><span class="device">网卡 B</span><span class="device">GPU B0</span><span class="device">GPU B1</span></div>
+          <p class="diagram-caption">B0 与 B1 可另走 NVLink / NVSwitch。</p>
+        </div>
+      </figure>
+      <div class="card-grid">
+        <div class="card blue"><h3>CPU ↔ GPU</h3><p>常见分立 GPU 经 PCIe。GH200 的 Grace ↔ Hopper 经 NVLink-C2C，支持一致性内存访问。</p></div>
+        <div class="card green"><h3>同机 GPU ↔ GPU</h3><p>可经 PCIe P2P、NVLink 直连或 NVSwitch。交换芯片按目标端口转发。</p></div>
+        <div class="card purple"><h3>跨机 GPU ↔ GPU</h3><p>常见路径包含本机 GPU ↔ 网卡、IB / RoCE 网络、对端网卡 ↔ GPU 三段。</p></div>
+      </div>
+      <div class="note"><p><strong>共享带宽</strong>　同一颗 PCIe Switch 下的 GPU 与网卡可以在支持时直接 P2P。多个下行设备同时访问主机内存时，可能共用 Switch 上行链路。</p></div>
+    </section>
 
-      <section class="chapter" id="rdma" aria-labelledby="rdma-title">
-        <header class="chapter-header">
-          <h2 id="rdma-title">RDMA 让网卡直接访问远端缓冲区</h2>
-          <p class="intro">一次 RDMA Write 从准备缓冲区开始，经过连接建立、提交、搬运和完成同步。</p>
-        </header>
-        <div class="card-grid">
-          <div class="card blue"><h3>DMA · 本机</h3><p>设备按命令读写本机内存。例如网卡用 DMA 从 DRAM 读取待发数据。</p></div>
-          <div class="card purple"><h3>RDMA · 跨机</h3><p>网卡执行读写请求，按对端授权访问已注册的内存。InfiniBand 和 RoCE 都可承载 RDMA。</p></div>
-          <div class="card green"><h3>GPUDirect RDMA · GPU 显存</h3><p>通信库可以把 GPU 显存注册给网卡，网卡即可通过本机 PCIe 直接读取或写入它。</p></div>
-        </div>
-        <ol class="steps">
-          <li class="card step"><h3>注册缓冲区</h3><code>ibv_reg_mr()</code><p>注册地址范围和访问权限，得到内存区域（MR）。</p></li>
-          <li class="card step"><h3>建立连接</h3><code>ibv_create_qp()</code><p>建立和配置队列对（QP），交换远端缓冲区地址和访问钥匙 <code class="inline-key">rkey</code>。</p></li>
-          <li class="card step"><h3>提交写请求</h3><code>ibv_post_send()</code><p>提供本地地址、lkey、长度、远端地址和 rkey。</p></li>
-          <li class="card step purple"><h3>网卡搬数据</h3><p>源网卡 DMA 读，经网络送到目标网卡。目标网卡校验权限后 DMA 写。</p></li>
-          <li class="card step green"><h3>完成与同步</h3><code>ibv_poll_cq()</code><p>查询请求完成。接收端按协议获知何时可以消费数据，并与 GPU stream 协调。</p></li>
+    <section class="chapter" id="rdma" aria-labelledby="rdma-title">
+      <header class="chapter-header">
+        <h2 id="rdma-title">RDMA 让网卡直接访问远端缓冲区</h2>
+        <p class="intro">一次 RDMA Write 从准备缓冲区开始，经过连接建立、提交、搬运和完成同步。</p>
+      </header>
+      <div class="card-grid">
+        <div class="card blue"><h3>DMA · 本机</h3><p>设备按命令读写本机内存。例如网卡用 DMA 从 DRAM 读取待发数据。</p></div>
+        <div class="card purple"><h3>RDMA · 跨机</h3><p>网卡执行读写请求，按对端授权访问已注册的内存。InfiniBand 和 RoCE 都可承载 RDMA。</p></div>
+        <div class="card green"><h3>GPUDirect RDMA · GPU 显存</h3><p>通信库可以把 GPU 显存注册给网卡，网卡即可通过本机 PCIe 直接读取或写入它。</p></div>
+      </div>
+      <ol class="steps">
+        <li class="card step"><h3>注册缓冲区</h3><code>ibv_reg_mr()</code><p>注册地址范围和访问权限，得到内存区域（MR）。</p></li>
+        <li class="card step"><h3>建立连接</h3><code>ibv_create_qp()</code><p>建立和配置队列对（QP），交换远端缓冲区地址和访问钥匙 <code class="inline-key">rkey</code>。</p></li>
+        <li class="card step"><h3>提交写请求</h3><code>ibv_post_send()</code><p>提供本地地址、lkey、长度、远端地址和 rkey。</p></li>
+        <li class="card step purple"><h3>网卡搬数据</h3><p>源网卡 DMA 读，经网络送到目标网卡。目标网卡校验权限后 DMA 写。</p></li>
+        <li class="card step green"><h3>完成与同步</h3><code>ibv_poll_cq()</code><p>查询请求完成。接收端按协议获知何时可以消费数据，并与 GPU stream 协调。</p></li>
+      </ol>
+      <div class="note"><p><strong>CPU 的角色</strong>　应用或通信库负责注册、提交与协调，Tensor 字节由设备搬运。普通 RDMA Write 需要协议配合，才能通知接收应用何时读取。</p></div>
+    </section>
+
+    <section class="chapter" id="paths" aria-labelledby="paths-title">
+      <header class="chapter-header">
+        <h2 id="paths-title">同一个跨机 Tensor 可以走不同路径</h2>
+        <p class="intro">节点 A 的 GPU A0 发给节点 B 的 GPU B0。网卡之间保持 RDMA 时，两端仍可分别决定是否经过主机内存。</p>
+      </header>
+      <table class="data-table paths">
+        <colgroup><col><col><col></colgroup>
+        <thead><tr><th scope="col">传输方式</th><th scope="col">Tensor 数据路径</th><th scope="col">主机内存中转</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">双端 GPUDirect RDMA</th><td><code>GPU A0 → 网卡 A → IB/RoCE → 网卡 B → GPU B0</code></td><td><span class="tag">无中转</span></td></tr>
+          <tr><th scope="row">仅发送端 GPUDirect</th><td><code>GPU A0 → 网卡 A → IB/RoCE → 网卡 B → 主机 B → GPU B0</code></td><td><span class="tag-amber">接收端中转</span></td></tr>
+          <tr><th scope="row">仅接收端 GPUDirect</th><td><code>GPU A0 → 主机 A → 网卡 A → IB/RoCE → 网卡 B → GPU B0</code></td><td><span class="tag-amber">发送端中转</span></td></tr>
+          <tr><th scope="row">RDMA 经主机内存</th><td><code>GPU A0 → 主机 A → 网卡 A → IB/RoCE → 网卡 B → 主机 B → GPU B0</code></td><td><span class="tag-purple">双端中转</span></td></tr>
+          <tr><th scope="row">TCP Socket</th><td><code>GPU A0 → 主机 A → TCP/IP → 主机 B → GPU B0</code></td><td><span class="tag-amber">双端中转</span></td></tr>
+        </tbody>
+      </table>
+      <div class="note"><p><strong>例子</strong>　双端 GDR 时，源网卡经本机 PCIe 读取 GPU A0 的显存，对端网卡经自己的 PCIe 路径写入 GPU B0 的显存。</p></div>
+    </section>
+
+    <section class="chapter" id="transport" aria-labelledby="transport-title">
+      <header class="chapter-header">
+        <h2 id="transport-title">NCCL 按连接选择传输</h2>
+        <p class="intro">训练框架划分 rank 组。NCCL 根据拓扑和可用能力组织 channel，为每条收发连接设置传输。</p>
+      </header>
+      <figure class="decision" aria-label="NCCL 的 P2P、共享内存和网络传输选择">
+        <div class="root"><h3><code>selectTransport()</code></h3><p>检查传输的 <code>canConnect()</code>，选中后执行对应的 <code>setup()</code>。</p></div>
+        <ol class="branches">
+          <li class="card"><h3>P2P 可用</h3><p><code>p2pCanConnect()</code> → <code>p2pSendSetup()</code> / <code>p2pRecvSetup()</code>。GPU 互访通常经 NVLink 或 PCIe。</p></li>
+          <li class="card"><h3>P2P 未选中，SHM 可用</h3><p><code>shmCanConnect()</code> → <code>shmSendSetup()</code> / <code>shmRecvSetup()</code>。两张卡使用共享主机缓冲区。</p></li>
+          <li class="card"><h3>P2P 和 SHM 未选中，NET 可用</h3><p>IB / RoCE 等后端可分别检查发送端和接收端的 GDR。Socket 使用主机缓冲区。</p></li>
         </ol>
-        <div class="note"><p><strong>CPU 的角色</strong>　应用或通信库负责注册、提交与协调，Tensor 字节由设备搬运。普通 RDMA Write 需要协议配合，才能通知接收应用何时读取。</p></div>
-      </section>
+      </figure>
+      <div class="note"><p><strong>按连接选</strong>　同一次 All-to-All 可以在机内连接上走 P2P，在跨机连接上走 NET。平台专用传输和网络插件可以改变具体路径。</p></div>
+    </section>
 
-      <section class="chapter" id="paths" aria-labelledby="paths-title">
-        <header class="chapter-header">
-          <h2 id="paths-title">同一个跨机 Tensor 可以走不同路径</h2>
-          <p class="intro">节点 A 的 GPU A0 发给节点 B 的 GPU B0。网卡之间保持 RDMA 时，两端仍可分别决定是否经过主机内存。</p>
-        </header>
-        <table class="data-table paths">
-          <colgroup><col><col><col></colgroup>
-          <thead><tr><th scope="col">传输方式</th><th scope="col">Tensor 数据路径</th><th scope="col">主机内存中转</th></tr></thead>
-          <tbody>
-            <tr><th scope="row">双端 GPUDirect RDMA</th><td><code>GPU A0 → 网卡 A → IB/RoCE → 网卡 B → GPU B0</code></td><td><span class="tag">无中转</span></td></tr>
-            <tr><th scope="row">仅发送端 GPUDirect</th><td><code>GPU A0 → 网卡 A → IB/RoCE → 网卡 B → 主机 B → GPU B0</code></td><td><span class="tag-amber">接收端中转</span></td></tr>
-            <tr><th scope="row">仅接收端 GPUDirect</th><td><code>GPU A0 → 主机 A → 网卡 A → IB/RoCE → 网卡 B → GPU B0</code></td><td><span class="tag-amber">发送端中转</span></td></tr>
-            <tr><th scope="row">RDMA 经主机内存</th><td><code>GPU A0 → 主机 A → 网卡 A → IB/RoCE → 网卡 B → 主机 B → GPU B0</code></td><td><span class="tag-purple">双端中转</span></td></tr>
-            <tr><th scope="row">TCP Socket</th><td><code>GPU A0 → 主机 A → TCP/IP → 主机 B → GPU B0</code></td><td><span class="tag-amber">双端中转</span></td></tr>
-          </tbody>
-        </table>
-        <div class="note"><p><strong>例子</strong>　双端 GDR 时，源网卡经本机 PCIe 读取 GPU A0 的显存，对端网卡经自己的 PCIe 路径写入 GPU B0 的显存。</p></div>
-      </section>
+    <section class="chapter" id="calls" aria-labelledby="calls-title">
+      <header class="chapter-header">
+        <h2 id="calls-title">从训练接口追到网卡提交函数</h2>
+        <p class="intro">源码示例使用 Megatron Core 0.16、PyTorch 2.9.0 和 NCCL 2.27.7-1，涉及训练提交、连接建立和数据传输三个阶段。</p>
+      </header>
+      <table class="data-table calls">
+        <colgroup><col><col></colgroup>
+        <thead><tr><th scope="col">操作或阶段</th><th scope="col">入口与调用</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">TP AllReduce</th><td><code>Megatron _reduce() → dist.all_reduce() → ProcessGroupNCCL::allreduce() → ncclAllReduce()</code></td></tr>
+          <tr><th scope="row">EP All-to-All</th><td><code>all_to_all() → dist.all_to_all_single() → ProcessGroupNCCL::alltoall_base()</code><p>按构建与分片形态走原生 All-to-All，或分组提交 <code>ncclSend()</code> 与 <code>ncclRecv()</code>。</p></td></tr>
+          <tr><th scope="row">NET 连接建立</th><td><code>sendSetup() / recvSetup() → ncclTopoGetNetDev() → ncclTopoCheckGdr()</code><p>NCCL 内置 IB 后端经 <code>regMr</code> 或 <code>regMrDmaBuf</code> 注册网卡使用的缓冲区。</p></td></tr>
+          <tr><th scope="row">IB / RoCE 提交数据</th><td><code>ncclIbIsend() → ncclIbMultiSend() → wrap_ibv_post_send()</code><p>此实现用 RDMA Write 类请求。CUDA stream 依赖和接收完成由通信库协调。</p></td></tr>
+        </tbody>
+      </table>
+      <details class="sources">
+        <summary>查看对应源码</summary>
+        <ul>
+          <li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/Megatron-LM/blob/core_r0.16.0/megatron/core/tensor_parallel/mappings.py">Megatron Core 的 TP 和 All-to-All 入口</a></li>
+          <li><a target="_blank" rel="noopener" href="https://github.com/pytorch/pytorch/blob/v2.9.0/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp">PyTorch ProcessGroupNCCL</a></li>
+          <li><a target="_blank" rel="noopener" href="https://github.com/pytorch/pytorch/blob/v2.9.0/torch/csrc/cuda/nccl.cpp#L831">PyTorch 的 All-to-All 提交</a></li>
+          <li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/nccl/blob/v2.27.7-1/src/transport.cc#L14">NCCL 传输选择</a></li>
+          <li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/nccl/blob/v2.27.7-1/src/transport/net.cc#L196">NCCL 网卡选择和 GDR 检查</a></li>
+          <li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/nccl/blob/v2.27.7-1/src/transport/net_ib.cc#L2111">NCCL 内置 IB 后端</a></li>
+        </ul>
+      </details>
+    </section>
 
-      <section class="chapter" id="transport" aria-labelledby="transport-title">
-        <header class="chapter-header">
-          <h2 id="transport-title">NCCL 按连接选择传输</h2>
-          <p class="intro">训练框架划分 rank 组。NCCL 根据拓扑和可用能力组织 channel，为每条收发连接设置传输。</p>
-        </header>
-        <figure class="decision" aria-label="NCCL 的 P2P、共享内存和网络传输选择">
-          <div class="root"><h3><code>selectTransport()</code></h3><p>检查传输的 <code>canConnect()</code>，选中后执行对应的 <code>setup()</code>。</p></div>
-          <ol class="branches">
-            <li class="card"><h3>P2P 可用</h3><p><code>p2pCanConnect()</code> → <code>p2pSendSetup()</code> / <code>p2pRecvSetup()</code>。GPU 互访通常经 NVLink 或 PCIe。</p></li>
-            <li class="card"><h3>P2P 未选中，SHM 可用</h3><p><code>shmCanConnect()</code> → <code>shmSendSetup()</code> / <code>shmRecvSetup()</code>。两张卡使用共享主机缓冲区。</p></li>
-            <li class="card"><h3>P2P 和 SHM 未选中，NET 可用</h3><p>IB / RoCE 等后端可分别检查发送端和接收端的 GDR。Socket 使用主机缓冲区。</p></li>
-          </ol>
-        </figure>
-        <div class="note"><p><strong>按连接选</strong>　同一次 All-to-All 可以在机内连接上走 P2P，在跨机连接上走 NET。平台专用传输和网络插件可以改变具体路径。</p></div>
-      </section>
-
-      <section class="chapter" id="calls" aria-labelledby="calls-title">
-        <header class="chapter-header">
-          <h2 id="calls-title">从训练接口追到网卡提交函数</h2>
-          <p class="intro">源码示例使用 Megatron Core 0.16、PyTorch 2.9.0 和 NCCL 2.27.7-1，涉及训练提交、连接建立和数据传输三个阶段。</p>
-        </header>
-        <table class="data-table calls">
-          <colgroup><col><col></colgroup>
-          <thead><tr><th scope="col">操作或阶段</th><th scope="col">入口与调用</th></tr></thead>
-          <tbody>
-            <tr><th scope="row">TP AllReduce</th><td><code>Megatron _reduce() → dist.all_reduce() → ProcessGroupNCCL::allreduce() → ncclAllReduce()</code></td></tr>
-            <tr><th scope="row">EP All-to-All</th><td><code>all_to_all() → dist.all_to_all_single() → ProcessGroupNCCL::alltoall_base()</code><p>按构建与分片形态走原生 All-to-All，或分组提交 <code>ncclSend()</code> 与 <code>ncclRecv()</code>。</p></td></tr>
-            <tr><th scope="row">NET 连接建立</th><td><code>sendSetup() / recvSetup() → ncclTopoGetNetDev() → ncclTopoCheckGdr()</code><p>NCCL 内置 IB 后端经 <code>regMr</code> 或 <code>regMrDmaBuf</code> 注册网卡使用的缓冲区。</p></td></tr>
-            <tr><th scope="row">IB / RoCE 提交数据</th><td><code>ncclIbIsend() → ncclIbMultiSend() → wrap_ibv_post_send()</code><p>此实现用 RDMA Write 类请求。CUDA stream 依赖和接收完成由通信库协调。</p></td></tr>
-          </tbody>
-        </table>
-        <details class="sources">
-          <summary>查看对应源码</summary>
-          <ul>
-            <li><a href="https://github.com/NVIDIA/Megatron-LM/blob/core_r0.16.0/megatron/core/tensor_parallel/mappings.py">Megatron Core 的 TP 和 All-to-All 入口</a></li>
-            <li><a href="https://github.com/pytorch/pytorch/blob/v2.9.0/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp">PyTorch ProcessGroupNCCL</a></li>
-            <li><a href="https://github.com/pytorch/pytorch/blob/v2.9.0/torch/csrc/cuda/nccl.cpp#L831">PyTorch 的 All-to-All 提交</a></li>
-            <li><a href="https://github.com/NVIDIA/nccl/blob/v2.27.7-1/src/transport.cc#L14">NCCL 传输选择</a></li>
-            <li><a href="https://github.com/NVIDIA/nccl/blob/v2.27.7-1/src/transport/net.cc#L196">NCCL 网卡选择和 GDR 检查</a></li>
-            <li><a href="https://github.com/NVIDIA/nccl/blob/v2.27.7-1/src/transport/net_ib.cc#L2111">NCCL 内置 IB 后端</a></li>
-          </ul>
-        </details>
-      </section>
-
-      <section class="chapter" id="validation" aria-labelledby="validation-title">
-        <header class="chapter-header">
-          <h2 id="validation-title">从机器配置到实际验证</h2>
-          <p class="intro">从 GPU 互访能力查到实际训练选用的网卡和传输。能测通主机内存上的 RDMA 后，再单独确认网卡能否直接访问显存。</p>
-        </header>
-        <table class="data-table checks">
-          <colgroup><col><col><col></colgroup>
-          <thead><tr><th scope="col">检查项</th><th scope="col">命令或工具</th><th scope="col">核对内容</th></tr></thead>
-          <tbody>
-            <tr><th scope="row">看硬件拓扑</th><td><code>nvidia-smi topo -m</code>、<code>lspci -tv</code></td><td>确认 GPU ↔ GPU、GPU ↔ NIC 的路径和 NUMA。</td></tr>
-            <tr><th scope="row">测同机 P2P</th><td><code>nvidia-smi topo -p2p p</code>、<code>nvbandwidth</code></td><td>核对 P2P 能力，再实测 GPU 互访带宽。</td></tr>
-            <tr><th scope="row">测跨机 RDMA</th><td><code>rdma link</code>、<code>ibv_devinfo</code>、<code>ib_write_bw</code></td><td>先测主机缓冲区，再用支持 CUDA 的 perftest 测 GPU 缓冲区。</td></tr>
-            <tr><th scope="row">复现训练通信</th><td><code>NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT,NET,GRAPH</code></td><td>核对网卡和传输，再用相同 GPU 分组的 NCCL Tests 实测。</td></tr>
-          </tbody>
-        </table>
-        <div class="note"><p><strong>配置归属</strong>　整机布线决定硬件拓扑。宿主机驱动和平台所需的 Fabric Manager / NVLSM 初始化互联。网卡驱动、IB / RoCE 网络以及 DMA-BUF 或 <code>nvidia-peermem</code> 支撑 GDR。</p></div>
-        <details class="sources">
-          <summary>查看 NVIDIA 参考文档</summary>
-          <ul>
-            <li><a href="https://docs.nvidia.com/deploy/nvidia-smi/index.html">nvidia-smi 拓扑命令</a></li>
-            <li><a href="https://docs.nvidia.com/cuda/gpudirect-rdma/index.html">GPUDirect RDMA</a></li>
-            <li><a href="https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/troubleshooting.html">NCCL 排查指南</a></li>
-            <li><a href="https://docs.nvidia.com/datacenter/tesla/fabric-manager-user-guide/">Fabric Manager</a></li>
-            <li><a href="https://github.com/NVIDIA/nccl-tests">NCCL Tests</a></li>
-          </ul>
-        </details>
-      </section>
-    </main>
-  </div>
-  <script>
-    const chapters = [...document.querySelectorAll("main > .chapter")];
-    const contents = [...document.querySelectorAll(".toc a")];
-
-    function showChapter() {
-      const active = chapters.find(chapter => "#" + chapter.id === location.hash) ?? chapters[0];
-      for (const chapter of chapters) {
-        chapter.hidden = chapter !== active;
-      }
-      for (const link of contents) {
-        if (link.hash === "#" + active.id) {
-          link.setAttribute("aria-current", "location");
-        } else {
-          link.removeAttribute("aria-current");
-        }
-      }
-    }
-
-    showChapter();
-    window.addEventListener("hashchange", () => {
-      showChapter();
-      window.scrollTo(0, 0);
-    });
-  </script>
+    <section class="chapter" id="validation" aria-labelledby="validation-title">
+      <header class="chapter-header">
+        <h2 id="validation-title">从机器配置到实际验证</h2>
+        <p class="intro">从 GPU 互访能力查到实际训练选用的网卡和传输。能测通主机内存上的 RDMA 后，再单独确认网卡能否直接访问显存。</p>
+      </header>
+      <table class="data-table checks">
+        <colgroup><col><col><col></colgroup>
+        <thead><tr><th scope="col">检查项</th><th scope="col">命令或工具</th><th scope="col">核对内容</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">看硬件拓扑</th><td><code>nvidia-smi topo -m</code>、<code>lspci -tv</code></td><td>确认 GPU ↔ GPU、GPU ↔ NIC 的路径和 NUMA。</td></tr>
+          <tr><th scope="row">测同机 P2P</th><td><code>nvidia-smi topo -p2p p</code>、<code>nvbandwidth</code></td><td>核对 P2P 能力，再实测 GPU 互访带宽。</td></tr>
+          <tr><th scope="row">测跨机 RDMA</th><td><code>rdma link</code>、<code>ibv_devinfo</code>、<code>ib_write_bw</code></td><td>先测主机缓冲区，再用支持 CUDA 的 perftest 测 GPU 缓冲区。</td></tr>
+          <tr><th scope="row">复现训练通信</th><td><code>NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT,NET,GRAPH</code></td><td>核对网卡和传输，再用相同 GPU 分组的 NCCL Tests 实测。</td></tr>
+        </tbody>
+      </table>
+      <div class="note"><p><strong>配置归属</strong>　整机布线决定硬件拓扑。宿主机驱动和平台所需的 Fabric Manager / NVLSM 初始化互联。网卡驱动、IB / RoCE 网络以及 DMA-BUF 或 <code>nvidia-peermem</code> 支撑 GDR。</p></div>
+      <details class="sources">
+        <summary>查看 NVIDIA 参考文档</summary>
+        <ul>
+          <li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/deploy/nvidia-smi/index.html">nvidia-smi 拓扑命令</a></li>
+          <li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/gpudirect-rdma/index.html">GPUDirect RDMA</a></li>
+          <li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/troubleshooting.html">NCCL 排查指南</a></li>
+          <li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/datacenter/tesla/fabric-manager-user-guide/">Fabric Manager</a></li>
+          <li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/nccl-tests">NCCL Tests</a></li>
+        </ul>
+      </details>
+    </section>
+  </main>
 </body>
 </html>
