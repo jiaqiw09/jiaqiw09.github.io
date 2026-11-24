@@ -13,13 +13,12 @@
   --blue: #245494;
   --green: #176c57;
   --line: #c7d6e8;
-  --paper: #ecf1f8;
   --orange: #914512;
   --mono: "DejaVu Sans Mono", Consolas, "Noto Sans CJK SC", monospace;
   font-family: Inter, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--paper); color: var(--ink); font-size: 16px; line-height: 1.43; }
+body { margin: 0; background: #fff; color: var(--ink); font-size: 16px; line-height: 1.43; }
 main { max-width: 1500px; padding: 14px clamp(10px, 2.1vw, 30px) 13px; margin: auto; }
 h1,h2,h3,p,pre { margin: 0; }
 h1,h2,h3 { line-height: 1.32; }
@@ -29,7 +28,7 @@ h3 { font-size: 1.01em; margin-bottom: 3px; }
 code,pre,.mono { font-family: var(--mono); font-size: .86em; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
 code { overflow-wrap: anywhere; }
-header { background: var(--navy); color: #fff; border-radius: 12px; padding: 14px 10px 16px; }
+header { background: #fff; color: var(--navy); border: 1px solid var(--line); border-radius: 12px; padding: 14px 10px 16px; }
 .grid { display: grid; gap: 9px; }
 .intro { grid-template-columns: minmax(0, .97fr) minmax(0, 1.03fr); margin-top: 10px; }
 .card { background: var(--fill, #fff); border: 1px solid var(--border, #b3c8e3); border-radius: 9px; padding: 7px 9px; min-width: 0; overflow-wrap: anywhere; }
@@ -49,23 +48,44 @@ ul,ol { margin: 3px 0 0; padding-left: 1.45em; }
 .rank-head { padding: 0 0 6px; text-align: center; }
 .rank-head h2 { padding: 5px 7px; margin: 0 0 4px; border-bottom: 1px solid var(--border); background: var(--chip); border-radius: 8px 8px 0 0; }
 .exchange { display: grid; align-content: center; justify-items: center; text-align: center; gap: 5px; color: #a12d22; font-weight: 750; }
-.wire { display: block; position: relative; width: min(90%, 220px); border-top: 2px dashed #3b6aaa; margin-block: 5px; }
-.wire::before,.wire::after { position: absolute; content: ""; top: -7px; border-top: 6px solid transparent; border-bottom: 6px solid transparent; }
-.wire::before { left: 0; border-right: 10px solid #3b6aaa; }
-.wire::after { right: 0; border-left: 10px solid #3b6aaa; }
+.wire { display: grid; grid-template-columns: 7px minmax(0, 1fr) 7px; align-items: center; width: min(90%, 220px); color: #3b6aaa; margin-block: 4px; }
+.wire > span { border-top: 2px dashed currentColor; }
+.wire::before, .wire::after, .flow-arrow::after {
+  content: ""; width: 7px; height: 7px;
+  border-top: 2px solid currentColor; border-right: 2px solid currentColor;
+  transform: rotate(45deg);
+}
+.wire::before { transform: rotate(-135deg); }
+.flow-arrow { display: block; position: relative; height: 12px; color: var(--blue); }
+.flow-arrow::before { content: ""; position: absolute; top: 5px; inset-inline: 2px 4px; border-top: 2px solid currentColor; }
+.flow-arrow::after { position: absolute; top: 2px; right: 3px; }
+.flow-arrow.reverse { color: var(--green); }
+.flow-arrow.reverse::before { inset-inline: 4px 2px; }
+.flow-arrow.reverse::after { right: auto; left: 3px; transform: rotate(-135deg); }
 .workflow { display: grid; margin-top: 7px; gap: 7px; }
-.stage { display: grid; grid-template-columns: minmax(0, 1.33fr) minmax(0, .87fr) minmax(0, 1.33fr); gap: clamp(7px, 1.65vw, 24px); align-items: start; }
-.stage.compute { grid-template-columns: minmax(0, .79fr) minmax(0, 1.45fr) minmax(0, .79fr); }
-.stage.combine { grid-template-columns: minmax(0, .93fr) minmax(0, 1.5fr) minmax(0, .93fr); }
+.stage {
+  --side: 1.33fr;
+  --center: .87fr;
+  display: grid;
+  grid-template-columns: minmax(0, var(--side)) minmax(0, var(--center)) minmax(0, var(--side));
+  gap: clamp(7px, 1.65vw, 24px);
+  align-items: start;
+}
+.stage.with-connector {
+  --gutter: clamp(23px, 2.7vw, 39px);
+  grid-template-columns: minmax(0, var(--side)) var(--gutter) minmax(0, var(--center)) var(--gutter) minmax(0, var(--side));
+  gap: 5px;
+}
+.stage.compute { --side: .79fr; --center: 1.45fr; }
+.stage.combine { --side: .93fr; --center: 1.5fr; }
+.connector { display: grid; align-self: start; gap: 3px; margin-top: 37px; }
+.compute .connector { margin-top: 22px; }
+.sort-arrow { width: 18px; margin: 2px auto; transform: rotate(90deg); }
 .lane { display: grid; grid-template-columns: 29px minmax(0, 1fr); gap: 6px; align-items: start; min-width: 0; }
 .badge { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 50%; font: 750 15px var(--mono); background: #225194; color: white; margin-top: 3px; }
 .middle .badge { color: var(--navy); background: white; border: 1.4px solid #526885; }
 .middle .card p + p,.lane .card > p + p { margin-top: 3px; }
 .middle pre { margin: 4px 0; }
-.middle { position: relative; }
-.route-mark { position: absolute; top: 43%; color: #2c64a6; font-size: 24px; line-height: 1; }
-.route-mark.left { left: -19px; }.route-mark.right { right: -18px; }
-.compute .route-mark.left { color: var(--blue); }.compute .route-mark.right { color: var(--green); }
 .chips { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 3px; vertical-align: middle; }
 .chip { display: inline-grid; place-items: center; padding: 1px 4px; min-width: 1.5em; font-size: .91em; background: var(--chip, #e0ecff); border: 1px solid var(--chip-border, #93b8ef); border-radius: 4px; color: var(--ink); }
 .chip.remote { background: #ffedcf; border-color: #e5b56c; }
@@ -97,13 +117,14 @@ ul,ol { margin: 3px 0 0; padding-left: 1.45em; }
 .result-steps b { display: inline-grid; min-width: 1.3em; height: 1.3em; place-items: center; margin-right: 2px; border-radius: 50%; background: #9b541b; color: white; font-size: .9em; }
 .closing { margin-top: 7px; color: #9c2e24; font-weight: 750; text-align: center; }
 @media(max-width:1100px) {
-  .stage { gap: 9px; grid-template-columns: minmax(0, 1fr) minmax(0, .88fr) minmax(0, 1fr); }
-  .stage.combine { grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 1fr); }
+  .stage { --side: 1fr; --center: .88fr; gap: 9px; }
+  .stage.compute { --side: .83fr; --center: 1.35fr; }
+  .stage.combine { --side: 1fr; --center: 1.25fr; }
   .combine-mid { grid-template-columns: 1fr; }
-  .route-mark { display: none; }
 }
 @media(max-width:740px) {
-  .intro,.stage,.stage.compute,.stage.combine { grid-template-columns: 1fr; }
+  .intro, .stage, .stage.with-connector { grid-template-columns: 1fr; }
+  .connector, .compute .connector { justify-self: center; width: 22px; margin: 3px 0; transform: rotate(90deg); }
   .rank-pair { grid-template-columns: minmax(0, 1fr) minmax(74px,.4fr) minmax(0,1fr); }
   .workflow { gap: 10px; }
   .stage { gap: 4px; padding-top: 5px; border-top: 1px solid var(--line); }
@@ -152,7 +173,7 @@ ul,ol { margin: 3px 0 0; padding-left: 1.45em; }
       <p>输入 tokens: [t0, t1, t2, t3]</p><p class="caption">卡0的 FSDP2 数据分片</p>
       <p>top_k_index: [[0,64], [1,65], ...]</p><p class="caption">全局 expert 编号</p>
     </section>
-    <div class="exchange"><p>输入 token 不同<br>（不同 DP 分片）</p><span class="wire" aria-hidden="true"></span></div>
+    <div class="exchange"><p>输入 token 不同<br>（不同 DP 分片）</p><span class="wire" aria-hidden="true"><span></span></span></div>
     <section class="card rank-head r1">
       <h2>EP Rank 1（持有 Expert 64–127）</h2>
       <p>输入 tokens: [t4, t5, t6, t7]</p><p class="caption">卡1的 FSDP2 数据分片</p>
@@ -184,17 +205,19 @@ ul,ol { margin: 3px 0 0; padding-left: 1.45em; }
       </div></div>
     </section>
 
-    <section class="stage" data-step="2" aria-labelledby="step-2">
+    <section class="stage with-connector" data-step="2" aria-labelledby="step-2">
       <div class="lane r0"><span class="badge" aria-hidden="true">2</span><div class="card">
         <p>Rank 0 发出 → Rank 1：卡0数据中路由到 Expert 64、65 的 token<br>Rank 0 收到 ← Rank 1：卡1数据中路由到 Expert 0、1 的 token</p>
         <p>现在 Rank 0 汇集了所有 EP rank 中需要 Expert 0、1 处理的 token。</p>
       </div></div>
+      <div class="connector" aria-hidden="true"><span class="flow-arrow"></span><span class="flow-arrow reverse"></span></div>
       <div class="lane middle neutral"><span class="badge" aria-hidden="true">2</span><div class="card">
         <h3 id="step-2">AllToAll：跨 EP rank 交换 token</h3>
         <pre>all_to_all(ep_group, tokens,
     output_splits, input_split)</pre>
         <p><strong>做什么：</strong>将需要远端 expert 计算的 token 发给对应 rank，同时接收其他 rank 发来的、需要本地 expert 计算的 token。</p>
-      </div><span class="route-mark left" aria-hidden="true">⤨</span><span class="route-mark right" aria-hidden="true">⤨</span></div>
+      </div></div>
+      <div class="connector" aria-hidden="true"><span class="flow-arrow"></span><span class="flow-arrow reverse"></span></div>
       <div class="lane r1"><span class="badge" aria-hidden="true">2</span><div class="card">
         <p>Rank 1 发出 → Rank 0：卡1数据中路由到 Expert 0、1 的 token<br>Rank 1 收到 ← Rank 0：卡0数据中路由到 Expert 64、65 的 token</p>
         <p>现在 Rank 1 汇集了所有 EP rank 中需要 Expert 64、65 处理的 token。</p>
@@ -208,7 +231,7 @@ ul,ol { margin: 3px 0 0; padding-left: 1.45em; }
           <div><span class="caption">来自卡0:</span><span class="chips"><span class="chip">t0(→e0)</span><span class="chip">t2(→e0)</span><span class="chip remote">t1(→e1)</span><span class="chip remote">t3(→e1)</span></span></div>
           <div><span class="caption">来自卡1:</span><span class="chips"><span class="chip">t4(→e0)</span><span class="chip">t6(→e0)</span><span class="chip remote">t5(→e1)</span><span class="chip remote">t7(→e1)</span></span></div>
         </div>
-        <p class="centered">混杂在一起，同一 expert 的 token 不连续<br>▼</p>
+        <p class="centered">混杂在一起，同一 expert 的 token 不连续</p><span class="sort-arrow flow-arrow" aria-hidden="true"></span>
         <div class="reordered"><strong>Rank 0 Permute 2 后：</strong> <span class="chips"><span>[</span><span class="chip">t0</span><span class="chip">t2</span><span class="chip">t4</span><span class="chip">t6</span><span>|</span><span class="chip remote">t1</span><span class="chip remote">t3</span><span class="chip remote">t5</span><span class="chip remote">t7</span><span>]</span></span></div>
         <p class="expert-labels mono">e0 e0 e0 e0　 e1 e1 e1 e1</p>
         <p>同一 expert 的 token 连续，split_list = [4, 4]，可直接 grouped matmul</p>
@@ -226,7 +249,7 @@ ul,ol { margin: 3px 0 0; padding-left: 1.45em; }
           <div><span class="caption">来自卡1:</span><span class="chips"><span class="chip">t4(→e64)</span><span class="chip">t6(→e64)</span><span class="chip remote">t5(→e65)</span><span class="chip remote">t7(→e65)</span></span></div>
           <div><span class="caption">来自卡0:</span><span class="chips"><span class="chip">t0(→e64)</span><span class="chip">t2(→e64)</span><span class="chip remote">t1(→e65)</span><span class="chip remote">t3(→e65)</span></span></div>
         </div>
-        <p class="centered">混杂在一起，同一 expert 的 token 不连续<br>▼</p>
+        <p class="centered">混杂在一起，同一 expert 的 token 不连续</p><span class="sort-arrow flow-arrow" aria-hidden="true"></span>
         <div class="reordered"><strong>Rank 1 Permute 2 后：</strong> <span class="chips"><span>[</span><span class="chip">t0</span><span class="chip">t2</span><span class="chip">t4</span><span class="chip">t6</span><span>|</span><span class="chip remote">t1</span><span class="chip remote">t3</span><span class="chip remote">t5</span><span class="chip remote">t7</span><span>]</span></span></div>
         <p class="expert-labels mono">e64 e64 e64 e64　 e65 e65 e65 e65</p>
         <p>同一 expert 的 token 连续，split_list = [4, 4]，可直接 grouped matmul</p>
@@ -234,8 +257,9 @@ ul,ol { margin: 3px 0 0; padding-left: 1.45em; }
       </div></div>
     </section>
 
-    <section class="stage compute" data-step="4" aria-labelledby="step-4">
+    <section class="stage compute with-connector" data-step="4" aria-labelledby="step-4">
       <div class="lane r0"><span class="badge" aria-hidden="true">4</span><div class="card centered"><p>Rank 0 只计算 Expert 0、1</p><p><span class="chip expert">e0</span><span class="chip expert">e1</span></p></div></div>
+      <div class="connector" aria-hidden="true"><span class="flow-arrow"></span></div>
       <div class="lane middle neutral"><span class="badge" aria-hidden="true">4</span><div>
         <div class="card"><h3 id="step-4">Expert Computation</h3>
           <pre>grouped_matmul(hidden_states, split_list, gate_up_weights)
@@ -243,7 +267,8 @@ ul,ol { margin: 3px 0 0; padding-left: 1.45em; }
 grouped_matmul(act, split_list, down_weights)</pre>
         </div>
         <p class="callout">💡 此时每个 rank 处理的 token 来自所有 EP rank，但只使用自己持有的 expert 权重进行计算。</p>
-      </div><span class="route-mark left" aria-hidden="true">→</span><span class="route-mark right" aria-hidden="true">←</span></div>
+      </div></div>
+      <div class="connector" aria-hidden="true"><span class="flow-arrow reverse"></span></div>
       <div class="lane r1"><span class="badge" aria-hidden="true">4</span><div class="card centered"><p>Rank 1 只计算 Expert 64、65</p><p><span class="chip expert">e64</span><span class="chip expert">e65</span></p></div></div>
     </section>
 
@@ -271,17 +296,19 @@ unpermute_indices2)</pre>
       </div></div>
     </section>
 
-    <section class="stage" data-step="6" aria-labelledby="step-6">
+    <section class="stage with-connector" data-step="6" aria-labelledby="step-6">
       <div class="lane r0"><span class="badge" aria-hidden="true">6</span><div class="card">
         <p>Rank 0 发出 → Rank 1：需要 Expert 64、65 计算的结果<br>Rank 0 收到 ← Rank 1：需要 Expert 0、1 计算的结果</p>
         <p>返还给原始持有该 token 的 rank。</p>
       </div></div>
+      <div class="connector" aria-hidden="true"><span class="flow-arrow"></span><span class="flow-arrow reverse"></span></div>
       <div class="lane middle neutral"><span class="badge" aria-hidden="true">6</span><div class="card">
         <h3 id="step-6">AllToAll：跨 EP rank 返还 token</h3>
         <pre>all_to_all(ep_group, tokens,
     input_split, output_splits)</pre>
         <p><strong>做什么：</strong>将 expert 计算完的 token 返还给原始 rank。</p>
-      </div><span class="route-mark left" aria-hidden="true">⤨</span><span class="route-mark right" aria-hidden="true">⤨</span></div>
+      </div></div>
+      <div class="connector" aria-hidden="true"><span class="flow-arrow"></span><span class="flow-arrow reverse"></span></div>
       <div class="lane r1"><span class="badge" aria-hidden="true">6</span><div class="card">
         <p>Rank 1 发出 → Rank 0：需要 Expert 0、1 计算的结果<br>Rank 1 收到 ← Rank 0：需要 Expert 64、65 计算的结果</p>
         <p>返还给原始持有该 token 的 rank。</p>
@@ -316,7 +343,7 @@ top_k_weights)</pre>
 
   <div class="grid rank-pair output">
     <div class="card r0"><span class="histogram" aria-hidden="true"><i></i><i></i><i></i><i></i></span><p><strong>输出：[num_tokens, hidden_size]</strong><br>每个 rank 拿回自己输入 token 对应的完整 expert 输出。</p></div>
-    <div class="exchange"><p>完成加权求和后的最终结果</p><span class="wire" aria-hidden="true"></span></div>
+    <div class="exchange"><p>完成加权求和后的最终结果</p><span class="wire" aria-hidden="true"><span></span></span></div>
     <div class="card r1"><span class="histogram" aria-hidden="true"><i></i><i></i><i></i><i></i></span><p><strong>输出：[num_tokens, hidden_size]</strong><br>每个 rank 拿回自己输入 token 对应的完整 expert 输出。</p></div>
   </div>
   <section class="card warm conclusion">
