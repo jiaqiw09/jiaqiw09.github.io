@@ -205,21 +205,20 @@ ul,ol { margin: 3px 0 0; padding-left: 1.45em; }
         <li>若一个样本序列长度为 S，则 Attention 输出 shape = [S, hidden_size]，MoE 输入就是这 S 个 token 向量。</li>
         <li>每个 token 会被 router 分配到 topk 个 expert。</li>
         <li>Permute / Unpermute 操作的是这 S×topk 个向量在行维度上的重排。</li>
-        <li><strong>关键前提</strong>：在 FSDP2 + EP 架构下，EP group 内各 rank 属于不同的数据分片，因此看到的输入 token 不同；AllToAll 负责把 token 发往对应 expert 所在 rank，并在计算后返还。</li>
+        <li><strong>关键前提</strong>：本例中，EP 组的两个 rank 持有不同的输入 token；AllToAll 负责把 token 发往对应 expert 所在 rank，并在计算后返还。</li>
       </ol>
       <p class="callout"><span class="symbol" aria-hidden="true">💡</span> <strong>注：</strong>4 卡、ep_size=2 时，EP group 可为 {卡0, 卡1} 与 {卡2, 卡3}；这里仅展示一个 EP group 内两张卡如何协作完成 MoE 计算。</p>
     </section>
     <section class="card r0">
-      <h2>3.1 为什么数学上等价</h2>
+      <h2>为什么 EP 不改变 MoE 的数学结果</h2>
       <ul>
-        <li><strong>计算视角</strong>：每个 expert 做的仍然是 output = input @ weight；GMM 只是把多个 expert 的矩阵乘法批量在一起，数学上等价于逐个 expert 分别计算再拼接。</li>
-        <li><strong>通信视角</strong>：AllToAll 只改 token 所在 rank，不改变 token 内容。</li>
-        <li><strong>排列视角</strong>：Permute 只改变顺序，Unpermute 恢复原始顺序；排序不改变矩阵乘法的数学结果。</li>
-        <li><strong>加权视角</strong>：最后按 top_k_weights 对 topk 个 expert 输出加权求和，等价于无 EP 时的组合方式。</li>
+        <li><strong>对比条件</strong>：两种执行方式使用相同的输入、专家函数、路由结果和路由权重，保留相同的 token–expert 配对。</li>
+        <li><strong>发往专家</strong>：每条记录对应一个 token 的一个 top-k 槽位。重排和第一次 AllToAll 将记录送到对应专家所在的 rank。</li>
+        <li><strong>按专家计算</strong>：Grouped MatMul 批量执行各专家的矩阵乘法，配合相同的激活函数和逐元素运算，得到每条记录的专家输出。</li>
+        <li><strong>返还与合并</strong>：恢复发送分段后，第二次 AllToAll 将专家输出送回输入 rank，再按原 token 和 top-k 槽位对齐权重并求和。</li>
       </ul>
-      <div class="callout"><pre>无 EP:  output[i] = Σₖ (top_k_weights[i,k] * expert[top_k_index[i,k]](token[i]))
-有 EP:  output[i] = unpermute(GMM(permute(AllToAll(permute(tokens)))))[i]
-        = Σₖ (top_k_weights[i,k] * expert[top_k_index[i,k]](token[i]))</pre></div>
+      <div class="callout"><pre>专家输出：z[i,k] = expert[top_k_index[i,k]](token[i])
+合并输出：output[i] = Σₖ top_k_weights[i,k] × z[i,k]</pre><p>两种执行方式在数学上得到同一个式子。浮点实现可能因计算顺序或 kernel 不同而有舍入差异。</p></div>
     </section>
   </div>
   </div>
@@ -228,14 +227,14 @@ ul,ol { margin: 3px 0 0; padding-left: 1.45em; }
   <div class="grid rank-pair module">
     <section class="card rank-head r0">
       <h2>EP Rank 0（持有 Expert 0–63）</h2>
-      <p>输入 tokens: [t0, t1, t2, t3]</p><p class="caption">卡0的 FSDP2 数据分片</p>
-      <p>top_k_index: [[0,64], [1,65], ...]</p><p class="caption">全局 expert 编号</p>
+      <p>输入 tokens: [t0, t1, t2, t3]</p><p class="caption">Rank 0 持有的输入 token</p>
+      <p>top_k_index: [[0,64], [1,65], [0,64], [1,65]]</p><p class="caption">全局 expert 编号</p>
     </section>
     <div class="exchange"><p>输入 token 不同<br>（不同 DP 分片）</p><span class="wire connection both-ends" aria-hidden="true"><span></span></span></div>
     <section class="card rank-head r1">
       <h2>EP Rank 1（持有 Expert 64–127）</h2>
-      <p>输入 tokens: [t4, t5, t6, t7]</p><p class="caption">卡1的 FSDP2 数据分片</p>
-      <p>top_k_index: [[64,0], [65,1], ...]</p><p class="caption">全局 expert 编号</p>
+      <p>输入 tokens: [t4, t5, t6, t7]</p><p class="caption">Rank 1 持有的输入 token</p>
+      <p>top_k_index: [[64,0], [65,1], [64,0], [65,1]]</p><p class="caption">全局 expert 编号</p>
     </section>
   </div>
   </div>
@@ -243,25 +242,25 @@ ul,ol { margin: 3px 0 0; padding-left: 1.45em; }
   <div class="diagram-scroll" role="region" aria-label="FSDP2 + EP 七步横向数据流">
   <div class="workflow" aria-label="FSDP2 加 EP 的七步数据流">
     <section class="stage" data-step="1" aria-labelledby="step-1">
-      <h2 class="stage-heading" id="step-1"><span class="step-number">1</span>Permute 1：按本地 expert 编号排序</h2>
+      <h2 class="stage-heading" id="step-1"><span class="step-number">1</span>Permute 1：按目标 rank 和 expert 分组</h2>
       <div class="stage-grid">
         <div class="lane r0"><div class="card">
-          <p>Rank 0 按本地 expert 0、1 排序（全局 0、1 就是本地 0、1）</p>
+          <p>Rank 0 按目标 rank 分组，组内按 expert 排序。</p>
           <p>sorted:</p>
-          <div class="stack-sorted"><div><span class="chips"><span class="chip">t0</span><span class="chip">t2</span><span class="chip">...</span></span><span class="caption">本地 expert（e0, e1）</span></div><b>|</b><div><span class="chips"><span class="chip remote">t1</span><span class="chip remote">t3</span><span class="chip remote">...</span></span><span class="caption">远端 expert（e64, e65）</span></div></div>
-          <p>本地 expert 的 token 排在前面，后面是发给其他 rank 的 token。</p>
+          <div class="stack-sorted"><div><span class="chips"><span class="chip">t0</span><span class="chip">t2</span><span class="chip">t1</span><span class="chip">t3</span></span><span class="caption">发往 Rank 0（e0, e1）</span></div><b>|</b><div><span class="chips"><span class="chip remote">t0</span><span class="chip remote">t2</span><span class="chip remote">t1</span><span class="chip remote">t3</span></span><span class="caption">发往 Rank 1（e64, e65）</span></div></div>
+          <p>每个输入 token 在两段中各出现一次，对应它的两个路由槽位。</p>
           <div class="save">保存 unpermute_indices1（用于最后恢复）</div>
         </div></div>
         <div class="lane middle neutral"><div class="card">
           <pre>permute(tokens, top_k_index)</pre>
-          <p><strong>做什么：</strong>按本 rank 持有的 expert 编号对 token 进行重排。</p>
-          <p><strong>为什么：</strong>AllToAll 需要知道每个 rank 发送 / 接收多少 token；排序后同一 expert 的 token 连续排列，可直接按 expert 边界切分，得到 output_splits 和 input_split.</p>
+          <p><strong>做什么：</strong>按路由展开 token，按目标 rank 拼接发送段，再按 expert 排序。</p>
+          <p><strong>为什么：</strong>先统计每个目标 rank 的发送量和每个来源 rank 的接收量，分别得到 input_splits 和 output_splits。本例两者都是 [4, 4]。</p>
         </div></div>
         <div class="lane r1"><div class="card">
-          <p>Rank 1 按本地 expert 0、1 排序（全局 64、65 映射为本地 0、1）</p>
+          <p>Rank 1 同样按目标 Rank 0 → 1 拼接发送段。</p>
           <p>sorted:</p>
-          <div class="stack-sorted"><div><span class="chips"><span class="chip">t4</span><span class="chip">t6</span><span class="chip">...</span></span><span class="caption">本地 expert（e64, e65）</span></div><b>|</b><div><span class="chips"><span class="chip remote">t5</span><span class="chip remote">t7</span><span class="chip remote">...</span></span><span class="caption">远端 expert（e0, e1）</span></div></div>
-          <p>本地 expert 的 token 排在前面，后面是发给其他 rank 的 token。</p>
+          <div class="stack-sorted"><div><span class="chips"><span class="chip remote">t4</span><span class="chip remote">t6</span><span class="chip remote">t5</span><span class="chip remote">t7</span></span><span class="caption">发往 Rank 0（e0, e1）</span></div><b>|</b><div><span class="chips"><span class="chip">t4</span><span class="chip">t6</span><span class="chip">t5</span><span class="chip">t7</span></span><span class="caption">发往 Rank 1（e64, e65）</span></div></div>
+          <p>Rank 0 段发给对端，Rank 1 段留在本卡。</p>
           <div class="save">保存 unpermute_indices1（用于最后恢复）</div>
         </div></div>
       </div>
@@ -277,7 +276,7 @@ ul,ol { margin: 3px 0 0; padding-left: 1.45em; }
         <div class="connector cross-connector" aria-hidden="true"><span class="connection both-ends"><span></span></span><span class="connection both-ends"><span></span></span></div>
         <div class="lane middle neutral"><div class="card">
           <pre>all_to_all(ep_group, tokens,
-    output_splits, input_split)</pre>
+    output_splits, input_splits)</pre>
           <p><strong>做什么：</strong>将需要远端 expert 计算的 token 发给对应 rank，同时接收其他 rank 发来的、需要本地 expert 计算的 token。</p>
         </div></div>
         <div class="connector cross-connector" aria-hidden="true"><span class="connection both-ends"><span></span></span><span class="connection both-ends"><span></span></span></div>
@@ -289,7 +288,7 @@ ul,ol { margin: 3px 0 0; padding-left: 1.45em; }
     </section>
 
     <section class="stage" data-step="3" aria-labelledby="step-3">
-      <h2 class="stage-heading" id="step-3"><span class="step-number">3</span>Permute 2：按全局 expert 编号重排</h2>
+      <h2 class="stage-heading" id="step-3"><span class="step-number">3</span>Permute 2：按本 rank 的 expert 重排</h2>
       <div class="stage-grid">
         <div class="lane r0"><div class="card">
           <p>Rank 0 AllToAll 后（混杂在一起）：</p>
@@ -305,14 +304,14 @@ ul,ol { margin: 3px 0 0; padding-left: 1.45em; }
         </div></div>
         <div class="lane middle neutral"><div class="card">
           <pre>permute(tokens, global_indices)</pre>
-          <p><strong>做什么：</strong>将 AllToAll 后的 token 按全局 expert 编号重新排序。</p>
-          <p><strong>为什么：</strong>AllToAll 后 token 按发送顺序拼接，同一 expert 的 token 可能分散在不同位置；Grouped MatMul 要求同一 expert 对应的所有 token 必须连续排列，才能作为一个 batch 计算。</p>
+          <p><strong>做什么：</strong>将两段接收数据按本 rank 持有的 expert 重新排序。</p>
+          <p><strong>为什么：</strong>AllToAll 后 token 按来源 rank 顺序拼接，同一 expert 的 token 可能分散在不同位置；Grouped MatMul 要求同一 expert 对应的所有 token 必须连续排列，才能作为一个 batch 计算。</p>
         </div></div>
         <div class="lane r1"><div class="card">
           <p>Rank 1 AllToAll 后（混杂在一起）：</p>
           <div class="input-lists">
-            <div><span class="caption">来自卡1:</span><span class="chips"><span class="chip">t4(→e64)</span><span class="chip">t6(→e64)</span><span class="chip remote">t5(→e65)</span><span class="chip remote">t7(→e65)</span></span></div>
             <div><span class="caption">来自卡0:</span><span class="chips"><span class="chip">t0(→e64)</span><span class="chip">t2(→e64)</span><span class="chip remote">t1(→e65)</span><span class="chip remote">t3(→e65)</span></span></div>
+            <div><span class="caption">来自卡1:</span><span class="chips"><span class="chip">t4(→e64)</span><span class="chip">t6(→e64)</span><span class="chip remote">t5(→e65)</span><span class="chip remote">t7(→e65)</span></span></div>
           </div>
           <p class="centered">混杂在一起，同一 expert 的 token 不连续</p><span class="sort-arrow" aria-hidden="true"></span>
           <div class="reordered"><strong>Rank 1 Permute 2 后：</strong> <span class="chips"><span>[</span><span class="chip">t0</span><span class="chip">t2</span><span class="chip">t4</span><span class="chip">t6</span><span>|</span><span class="chip remote">t1</span><span class="chip remote">t3</span><span class="chip remote">t5</span><span class="chip remote">t7</span><span>]</span></span></div>
@@ -348,11 +347,11 @@ grouped_matmul(act, split_list, down_weights)</pre>
           <p>按 expert 聚类 (Permute 2 后)：</p>
           <p class="centered"><span class="chips"><span>[</span><span class="chip">t0</span><span class="chip">t2</span><span class="chip">t4</span><span class="chip">t6</span><span>|</span><span class="chip">t1</span><span class="chip">t3</span><span class="chip">t5</span><span class="chip">t7</span><span>]</span></span></p>
           <p class="restore-label"><span class="connection points-right down-mark" aria-hidden="true"><span></span></span><strong>unpermute_indices2</strong></p>
-          <p>恢复到 AllToAll 后的顺序（按发送段拼接）：</p>
+          <p>撤销排序后（按原来源 Rank 0 → 1 分段）：</p>
           <p class="centered"><span class="sequence">[t0, t2, t1, t3 | t4, t6, t5, t7]</span></p>
         </div></div>
         <div class="lane middle neutral"><div class="card">
-          <pre>unpermute(tokens,
+          <pre>unpermute(expert_outputs,
 unpermute_indices2)</pre>
           <p><strong>做什么：</strong>撤销 Permute 2 的排序，恢复到 AllToAll 后的顺序。</p>
           <p><strong>为什么：</strong>返还阶段的 AllToAll 要求发送方和接收方的 split 顺序一致；Permute 2 打乱了这个顺序，必须先恢复。</p>
@@ -361,28 +360,28 @@ unpermute_indices2)</pre>
           <p>按 expert 聚类 (Permute 2 后)：</p>
           <p class="centered"><span class="chips"><span>[</span><span class="chip">t0</span><span class="chip">t2</span><span class="chip">t4</span><span class="chip">t6</span><span>|</span><span class="chip">t1</span><span class="chip">t3</span><span class="chip">t5</span><span class="chip">t7</span><span>]</span></span></p>
           <p class="restore-label"><span class="connection points-right down-mark" aria-hidden="true"><span></span></span><strong>unpermute_indices2</strong></p>
-          <p>恢复到 AllToAll 后的顺序（按发送段拼接）：</p>
-          <p class="centered"><span class="sequence">[t4, t6, t5, t7 | t0, t2, t1, t3]</span></p>
+          <p>撤销排序后（按原来源 Rank 0 → 1 分段）：</p>
+          <p class="centered"><span class="sequence">[t0, t2, t1, t3 | t4, t6, t5, t7]</span></p>
         </div></div>
       </div>
     </section>
 
     <section class="stage with-connector" data-step="6" aria-labelledby="step-6">
-      <h2 class="stage-heading" id="step-6"><span class="step-number">6</span>AllToAll：跨 EP rank 返还 token</h2>
+      <h2 class="stage-heading" id="step-6"><span class="step-number">6</span>AllToAll：跨 EP rank 返还专家输出</h2>
       <div class="stage-grid">
         <div class="lane r0"><div class="card">
-          <p>Rank 0 发出 → Rank 1：需要 Expert 64、65 计算的结果<br>Rank 0 收到 ← Rank 1：需要 Expert 0、1 计算的结果</p>
+          <p>Rank 0 发出 → Rank 1：Expert 0、1 对 t4–t7 的输出<br>Rank 0 收到 ← Rank 1：Expert 64、65 对 t0–t3 的输出</p>
           <p>返还给原始持有该 token 的 rank。</p>
         </div></div>
         <div class="connector cross-connector" aria-hidden="true"><span class="connection both-ends"><span></span></span><span class="connection both-ends"><span></span></span></div>
         <div class="lane middle neutral"><div class="card">
-          <pre>all_to_all(ep_group, tokens,
-    input_split, output_splits)</pre>
+          <pre>all_to_all(ep_group, expert_outputs,
+    input_splits, output_splits)</pre>
           <p><strong>做什么：</strong>将 expert 计算完的 token 返还给原始 rank。</p>
         </div></div>
         <div class="connector cross-connector" aria-hidden="true"><span class="connection both-ends"><span></span></span><span class="connection both-ends"><span></span></span></div>
         <div class="lane r1"><div class="card">
-          <p>Rank 1 发出 → Rank 0：需要 Expert 0、1 计算的结果<br>Rank 1 收到 ← Rank 0：需要 Expert 64、65 计算的结果</p>
+          <p>Rank 1 发出 → Rank 0：Expert 64、65 对 t0–t3 的输出<br>Rank 1 收到 ← Rank 0：Expert 0、1 对 t4–t7 的输出</p>
           <p>返还给原始持有该 token 的 rank。</p>
         </div></div>
       </div>
@@ -392,23 +391,23 @@ unpermute_indices2)</pre>
       <h2 class="stage-heading" id="step-7"><span class="step-number">7</span>Unpermute 2：恢复原始顺序 + 加权求和</h2>
       <div class="stage-grid">
         <div class="lane r0"><div class="card">
-          <p>AllToAll 返回后（仍是按发送段拼接）：</p>
-          <p class="centered"><span class="sequence">[t0, t2, t1, t3 | t4, t6, t5, t7]</span></p>
+          <p>AllToAll 返回后（两段分别来自 Expert 0、1 与 64、65）：</p>
+          <p class="centered"><span class="sequence">[t0, t2, t1, t3 | t0, t2, t1, t3]</span></p>
           <p class="restore-label"><span class="connection points-right down-mark" aria-hidden="true"><span></span></span><strong>unpermute_indices1 + top_k_weights</strong></p>
           <p>恢复原始 token 顺序：<span class="chips"><span>[</span><span class="chip">t0</span><span class="chip">t1</span><span class="chip">t2</span><span class="chip">t3</span><span>]</span></span><br>并对同一 token 的 topk 输出加权求和</p>
         </div></div>
         <div class="lane middle emphasis"><div class="grid combine-mid">
           <div class="card">
-            <pre>unpermute(tokens, unpermute_indices1,
+            <pre>unpermute(expert_outputs, unpermute_indices1,
 top_k_weights)</pre>
-            <p><strong>做什么：</strong>撤销 Permute 1 的排序，恢复原始 token 顺序。</p>
+            <p><strong>做什么：</strong>撤销 Permute 1 的排序，按原 token 和 top-k 槽位对齐专家输出。</p>
             <p><strong>为什么：</strong>需要恢复到原始的 [t0, t1, t2, ...] 顺序，才能把同一 token 的 topk 个 expert 输出正确对齐后，乘以 top_k_weights 并求和。</p>
           </div>
           <div class="card side-steps"><p><b>①</b> 恢复原始 token 顺序</p><p><b>②</b> 乘以路由权重 top_k_weights</p><p><b>③</b> 对同一 token 的 topk 个 expert 输出求和</p></div>
         </div></div>
         <div class="lane r1"><div class="card">
-          <p>AllToAll 返回后（仍是按发送段拼接）：</p>
-          <p class="centered"><span class="sequence">[t4, t6, t5, t7 | t0, t2, t1, t3]</span></p>
+          <p>AllToAll 返回后（两段分别来自 Expert 0、1 与 64、65）：</p>
+          <p class="centered"><span class="sequence">[t4, t6, t5, t7 | t4, t6, t5, t7]</span></p>
           <p class="restore-label"><span class="connection points-right down-mark" aria-hidden="true"><span></span></span><strong>unpermute_indices1 + top_k_weights</strong></p>
           <p>恢复原始 token 顺序：<span class="chips"><span>[</span><span class="chip">t4</span><span class="chip">t5</span><span class="chip">t6</span><span class="chip">t7</span><span>]</span></span><br>并对同一 token 的 topk 输出加权求和</p>
         </div></div>
@@ -429,10 +428,10 @@ top_k_weights)</pre>
     <div>
       <h2>最终结论</h2>
       <p><strong>Permute + AllToAll + Permute + Expert Compute + Unpermute + AllToAll + Unpermute 的整体流程，本质上只是：</strong></p>
-      <div class="result-steps"><span><b>1</b> 把 token 送到对应 expert 所在 rank；</span><span><b>2</b> 让同一 expert 的 token 连续排列以便 GMM 计算；</span><span><b>3</b> 计算后再按相反顺序还原；</span><span><b>4</b> 最终得到与无 EP 直接计算完全等价的结果。</span></div>
+      <div class="result-steps"><span><b>1</b> 把 token 送到对应 expert 所在 rank；</span><span><b>2</b> 让同一 expert 的 token 连续排列以便 GMM 计算；</span><span><b>3</b> 计算后再按相反顺序还原；</span><span><b>4</b> 在相同路由与专家函数下，得到与无 EP 相同的数学结果。</span></div>
     </div>
   </section>
-  <p class="closing">★ 通信只改变 token 的位置，Permute 只改变顺序，GMM 只改变执行方式，不改变最终数学结果。</p>
+  <p class="closing">★ 通信只改变 token 的位置，Permute 只改变顺序，GMM 只改变执行方式，在相同路由和专家函数下，MoE 的加权求和公式保持一致。</p>
 </main>
 </body>
 </html>

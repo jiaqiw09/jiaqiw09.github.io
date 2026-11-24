@@ -80,7 +80,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
 .train-table .card{padding:3px 4px}
 .labels-list{list-style:none;margin:5px 0 0;padding:0;font-size:.91em}
 .mini-line{margin-top:3px;padding:3px 4px}
-.mask-demo{display:grid;grid-template-columns:minmax(0,8fr) minmax(0,4fr);gap:7px;margin-top:4px;color:var(--muted);text-align:center}
+.mask-demo{display:grid;grid-template-columns:minmax(0,4fr) minmax(0,8fr);gap:7px;margin-top:4px;color:var(--muted);text-align:center}
 .mask-demo span{display:block}
 .mask-bitset{display:grid;gap:3px}
 .mask-bitset.eight{grid-template-columns:repeat(8,minmax(0,1fr))}
@@ -106,7 +106,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
     <h2 id="principle">1. 核心原理</h2>
     <div class="diagram-scroll" role="region" aria-label="Ulysses 四项核心原理">
     <div class="grid four">
-      <div class="card blue lead-card"><span class="icon" aria-hidden="true">▤</span><div><h3>非 Attention 层：</h3><p>Embedding / LayerNorm / MLP<br>按序列切分仍然正确<br><span class="muted">（per-token 独立）</span></p></div></div>
+      <div class="card blue lead-card"><span class="icon" aria-hidden="true">▤</span><div><h3>非 Attention 层：</h3><p>Embedding / RMSNorm / MLP<br>按序列切分仍然正确<br><span class="muted">（per-token 独立）</span></p></div></div>
       <div class="card orange lead-card"><span class="icon" aria-hidden="true">⟐</span><div><h3>Attention 层：</h3><p><strong>需要完整序列</strong><br>直接按序列切分会导致错误<br>因为 QK^T 需要每个 query<br>看见所有 key</p></div></div>
       <div class="card green lead-card"><span class="icon" aria-hidden="true">◫</span><div><h3>关键性质：</h3><p>不同 attention head<br>彼此独立<br>因此可以按 head<br>分工计算</p></div></div>
       <div class="card blue lead-card"><span class="icon" aria-hidden="true">⇄</span><div><h3>解决思路：</h3><p>通过两次 All-to-All 在<br>「部分序列 + 全部头」↔<br>「完整序列 + 部分头」之间切换</p></div></div>
@@ -128,12 +128,12 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
           <li><span aria-hidden="true">⚙</span><span>硬件：4 × GPU</span></li>
           <li><span aria-hidden="true">🔀</span><span>并行：FSDP2, cp_size=2, dp_size=2</span></li>
           <li><span aria-hidden="true">▦</span><span>DeviceMesh：(dp=2, cp=2)</span></li>
-          <li><span aria-hidden="true">📥</span><span>输入：batch_size=2, seq_len=8</span></li>
-          <li><span aria-hidden="true">◷</span><span>下文聚焦：<strong>DP组 0 = GPU0 + GPU1</strong></span></li>
+          <li><span aria-hidden="true">📥</span><span>每个 CP 组的输入：batch_size=2, seq_len=8</span></li>
+          <li><span aria-hidden="true">◷</span><span>下文聚焦：<strong>dp_rank=0 的 CP 组 = GPU0 + GPU1</strong></span></li>
         </ul>
       </div>
       <div class="card red group-card">
-        <h3>DP组0（我们聚焦此组）</h3>
+        <h3>CP 组（dp_rank=0）</h3>
         <div class="rank-pair">
           <div class="card green"><strong>GPU0</strong><br><code>(cp_rank=0)</code></div><p>↔</p>
           <div class="card green"><strong>GPU1</strong><br><code>(cp_rank=1)</code></div>
@@ -141,7 +141,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
         <p class="group-size mono">cp_size=2</p>
       </div>
       <div class="card gray group-card">
-        <h3>DP组1（另一个组）</h3>
+        <h3>CP 组（dp_rank=1）</h3>
         <div class="rank-pair">
           <div class="card gray"><strong>GPU2</strong><br><code>(cp_rank=0)</code></div><p>↔</p>
           <div class="card gray"><strong>GPU3</strong><br><code>(cp_rank=1)</code></div>
@@ -161,7 +161,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
         <div class="row-heading blue"><span class="badge">A</span>输入与切分</div>
         <div class="row-main">
           <div class="grid a-top">
-            <div class="card blue"><strong>完整输入（每个 rank 初始看到相同数据）</strong><br>input_ids / labels / attention_mask /<br>loss_weights / position_ids<p class="center mono">shape: (2, 8)</p></div>
+            <div class="card blue"><strong>完整输入（同一 CP 组内各 rank 看到相同数据）</strong><br>input_ids / labels / attention_mask /<br>loss_weights / position_ids<p class="center mono">shape: (2, 8)</p></div>
             <p class="arrow-detail">padding_and_split_data<span class="arrow">⟶</span><span class="muted">（沿序列维切分）</span></p>
             <div class="pair">
               <div class="card green rank-input"><strong>GPU0 (cp_rank=0)</strong><br>取前半序列<p class="mono">shape: (2, 4)</p></div>
@@ -172,7 +172,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
         </div>
       </article>
       <article class="row">
-        <div class="row-heading blue"><span class="badge">B</span>Embedding /<br>LayerNorm / MLP</div>
+        <div class="row-heading blue"><span class="badge">B</span>Embedding /<br>RMSNorm / MLP</div>
         <div class="row-main">
           <div class="grid two align">
             <p class="card blue"><strong>这些层是 per-token 计算</strong><br>序列切分下可直接独立计算</p>
@@ -184,14 +184,15 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
         <div class="row-heading blue"><span class="badge">C</span>QKV 投影后</div>
         <div class="row-main">
           <div class="grid three align">
-            <pre class="card green"><strong>GPU0: Q = (2, 4, 16, 64)</strong>
-      K = (2, 4, 8, 64)
-      V = (2, 4, 8, 64)</pre>
-            <pre class="card green"><strong>GPU1: Q = (2, 4, 16, 64)</strong>
-      K = (2, 4, 8, 64)
-      V = (2, 4, 8, 64)</pre>
+            <pre class="card green"><strong>GPU0: Q = (2, 4, 16, 128)</strong>
+      K = (2, 4, 8, 128)
+      V = (2, 4, 8, 128)</pre>
+            <pre class="card green"><strong>GPU1: Q = (2, 4, 16, 128)</strong>
+      K = (2, 4, 8, 128)
+      V = (2, 4, 8, 128)</pre>
             <pre class="card green">GQA: num_attention_heads = 16
-     num_key_value_heads = 8</pre>
+     num_key_value_heads = 8
+     head_dim = 128</pre>
           </div>
         </div>
       </article>
@@ -202,15 +203,15 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
             <div class="card red transfer">
               <p class="transfer-label"><code>scatter_dim = 头维, gather_dim = 序列维</code>部分序列 + 全部头 → 完整序列 + 部分头</p>
               <div class="grid two">
-                <pre class="card red">GPU0: Q′ = (2, 8, 8, 64)
-      K′ = (2, 8, 4, 64)
-      V′ = (2, 8, 4, 64)</pre>
-                <pre class="card red">GPU1: Q′ = (2, 8, 8, 64)
-      K′ = (2, 8, 4, 64)
-      V′ = (2, 8, 4, 64)</pre>
+                <pre class="card red">GPU0: Q′ = (2, 8, 8, 128)
+      K′ = (2, 8, 4, 128)
+      V′ = (2, 8, 4, 128)</pre>
+                <pre class="card red">GPU1: Q′ = (2, 8, 8, 128)
+      K′ = (2, 8, 4, 128)
+      V′ = (2, 8, 4, 128)</pre>
               </div>
             </div>
-            <div class="card red transfer-side"><p>attention_mask 也要 All-gather：</p><p class="center mono">(2, 4) → global_mask = (2, 8)</p></div>
+            <div class="card red transfer-side"><p>若 padding mask 已切分，可 All-gather：</p><p class="center mono">(2, 4) → global_mask = (2, 8)</p></div>
           </div>
           <p class="strip red">本质：每个 rank 放弃一半 heads，换回完整序列。</p>
         </div>
@@ -219,7 +220,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
         <div class="row-heading blue"><span class="badge">E</span>本地<br>Flash Attention</div>
         <div class="row-main">
           <div class="grid biased align">
-            <div class="card blue"><p>每个 rank 在「完整序列 + 部分头」上执行本地 attention<br>每个 head 都能看到完整序列，因此与单卡数学等价</p><p class="center mono">context = (2, 8, 8, 64)</p></div>
+            <div class="card blue"><p>每个 rank 在「完整序列 + 部分头」上执行本地 attention<br>每个 head 都能看到完整序列，因此与单卡数学等价</p><p class="center mono">context = (2, 8, 8, 128)</p></div>
             <p class="example formula">Attention(Q, K, V) = softmax(QK^T / √d) · V</p>
           </div>
           <p class="example">例：GPU0 虽然只算 head 0–7，但这些 head 都能看到完整 seq[0:8]。</p>
@@ -232,8 +233,8 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
             <div class="card red transfer">
               <p class="transfer-label"><code>scatter_dim = 序列维, gather_dim = 头维</code>完整序列 + 部分头 → 部分序列 + 全部头</p>
               <div class="grid two">
-                <p class="card red center mono">GPU0: output = (2, 4, 16, 64)</p>
-                <p class="card red center mono">GPU1: output = (2, 4, 16, 64)</p>
+                <p class="card red center mono">GPU0: output = (2, 4, 16, 128)</p>
+                <p class="card red center mono">GPU1: output = (2, 4, 16, 128)</p>
               </div>
             </div>
             <p class="card red transfer-side">把 full-seq local-head 的结果<br>换回模型后续层需要的格式。</p>
@@ -243,7 +244,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
       <article class="row">
         <div class="row-heading blue"><span class="badge">G</span>汇聚与后续层</div>
         <div class="row-main">
-          <div class="card blue last-step"><p class="mono">output → reshape (2, 4, 1024)</p><p>残差连接 + MLP + LayerNorm<br>下一层重复相同的 Attention 流程</p></div>
+          <div class="card blue last-step"><p class="mono">output → reshape (2, 4, 2048)<br>o_proj → (2, 4, 1024)</p><p>残差连接 + MLP + RMSNorm<br>下一层重复相同的 Attention 流程</p></div>
         </div>
       </article>
     </div>
@@ -255,7 +256,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
     <div class="diagram-scroll" role="region" aria-label="Flash Attention 四步对照">
     <div class="grid four steps-four">
       <div class="card blue"><h3>(1) UlySSes 改变的是分布式布局</h3><p>第一次 All-to-All 之后，<br>每张卡拿到的是<br>「完整 seq + 部分 heads」，<br>不是「短 seq + 全部 heads」。</p></div>
-      <div class="card orange"><h3>(2) 普通 attention 的问题</h3><p>若直接构造 attention scores，<br>shape 是 [B, H, S, S]。<br>当 seq_len 很长时，<br>S × S 显存会爆炸。</p><p class="inset">例：S = 128K, heads_per_rank = 8，<br>bf16 时，仅 scores 就约 274 GB。</p></div>
+      <div class="card orange"><h3>(2) 普通 attention 的问题</h3><p>若直接构造 attention scores，<br>shape 是 [B, H, S, S]。<br>当 seq_len 很长时，<br>S × S 显存会爆炸。</p><p class="inset">例：B = 1, S = 128K, heads_per_rank = 8，<br>bf16 时，仅 scores 就约 274 GB。</p></div>
       <div class="card green"><h3>(3) Flash Attention 的作用</h3><p>FA 按 block 分块计算，<br>在线 softmax，<br>不显式保存完整 S × S<br>attention matrix，<br>显存从接近 O(S²)<br>降到更接近 O(S)。</p></div>
       <div class="card blue"><h3>(4) 结论</h3><p>UlySSes 负责跨卡布局切换；<br>Flash Attention 负责让每张卡上的<br>full-seq attention 算得动。<br>所以工程上二者几乎绑定使用。</p></div>
     </div>
@@ -268,34 +269,34 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
     <div class="diagram-scroll" role="region" aria-label="SP 的四个特殊环节">
     <div class="grid four details">
       <div class="card blue">
-        <h3>(1) Loss 的标签对齐不能本地做</h3>
+        <h3>(1) 跨分片的 Loss 标签对齐</h3>
         <div class="grid two train-table center">
           <div class="card green"><strong>GPU0</strong><br><code>labels = [A, B, C]</code></div>
           <div class="card green"><strong>GPU1</strong><br><code>labels = [D, E, F]</code></div>
         </div>
         <p class="inset red" style="color:var(--red);font-weight:700">GPU0 最后一个 logits 应预测 D，但 D 在 GPU1 上，直接本地 shift 会错。</p>
         <ol class="labels-list">
-          <li>❶ All-gather labels / loss_weights</li>
+          <li>❶ 取得完整 labels 与对应 loss_weights</li>
           <li>❷ 全局 shift labels [..., 1:]</li>
           <li>❸ 末尾补 −100</li>
-          <li>❹ 再按序列维切分</li>
+          <li>❹ 将对齐后的标签和权重按序列切分</li>
         </ol>
         <p class="card green mini-line center"><strong>GPU0</strong>　<code>shift_labels = [B, C, D]</code></p>
         <p class="card green mini-line center"><strong>GPU1</strong>　<code>shift_labels = [E, F, -100]</code></p>
-        <p class="inset red">最后用对齐后的 shift_labels 与 logits<br>计算加权交叉熵。</p>
+        <p class="inset red">切分前即可完成全局 shift。若已经切分，只需补齐跨片边界的目标；最后用对齐的标签、权重与 logits 计算损失。</p>
       </div>
       <div class="card orange">
-        <h3>(2) attention_mask 也必须补齐为全局序列</h3>
-        <p>本地 rank 只有半段序列的 mask，<br>进入 attention 前需要<br>All-gather 成 global_mask。<br>否则 causal / padding<br>语义都不完整。</p>
+        <h3>(2) 使用全局序列对应的 mask</h3>
+        <p>如果 padding mask 随序列切分，可在进入 attention 前通过 All-gather 拼回完整 mask；若已保留完整 mask，可以直接复用。因果约束另外由位置或 kernel 的 causal 模式处理。</p>
         <p class="inset blue">例：本地 mask = (2, 4)，<br>拼成 global_mask = (2, 8)。</p>
-        <figure class="mask-demo" aria-label="原图的本地与全局 mask 方格示意">
-          <div><span>本地（每卡半段）</span><div class="mask-bitset eight" aria-hidden="true">
-            <i class="bit"></i><i class="bit off"></i><i class="bit"></i><i class="bit"></i><i class="bit off"></i><i class="bit"></i><i class="bit off"></i><i class="bit"></i>
-            <i class="bit"></i><i class="bit off"></i><i class="bit"></i><i class="bit"></i><i class="bit off"></i><i class="bit"></i><i class="bit off"></i><i class="bit"></i>
-          </div></div>
-          <div><span>全局（All-gather 后）</span><div class="mask-bitset four-bit" aria-hidden="true">
+        <figure class="mask-demo" aria-label="GPU0 的两行四列 padding mask 与拼接后的两行八列 mask">
+          <div><span>本地（GPU0）</span><div class="mask-bitset four-bit" aria-hidden="true">
             <i class="bit"></i><i class="bit off"></i><i class="bit"></i><i class="bit"></i>
             <i class="bit off"></i><i class="bit"></i><i class="bit off"></i><i class="bit"></i>
+          </div></div>
+          <div><span>全局（All-gather 后）</span><div class="mask-bitset eight" aria-hidden="true">
+            <i class="bit"></i><i class="bit off"></i><i class="bit"></i><i class="bit"></i><i class="bit off"></i><i class="bit"></i><i class="bit off"></i><i class="bit"></i>
+            <i class="bit off"></i><i class="bit"></i><i class="bit off"></i><i class="bit"></i><i class="bit"></i><i class="bit off"></i><i class="bit"></i><i class="bit"></i>
           </div></div>
         </figure>
         <p class="mask-key">□ 1: 有效　 ▧ 0: padding / 不可见</p>
@@ -303,16 +304,16 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
       <div class="card green">
         <h3>(3) Backward 的通信方向会自动反转</h3>
         <p>前向第一次 All-to-All 是<br>scatter 头 / gather 序列；<br>反向时对应变成<br>scatter 序列 / gather 头。<br>也就是通信的转置，<br>梯度沿相反路径流回。</p>
-        <p class="inset green">Forward: (2,4,16,64)→(2,8,8,64)<br>Backward: grad 反向换回</p>
+        <p class="inset green">Forward: (2,4,16,128)→(2,8,8,128)<br>Backward: grad 反向换回</p>
         <div class="directions"><p>前向：头 → 序列 →</p><p>← 反向：序列 → 头</p></div>
       </div>
       <div class="card blue">
-        <h3>(4) 梯度范数 / 标量统计要做组内汇总</h3>
-        <p>每个 CP rank 只看到局部序列，<br>局部 grad_norm 不能直接当全局值。<br>要在 CP 组内对 grad_norm² 做<br>All-Reduce(SUM)，再开方。</p>
-        <p class="inset blue">例：GPU0 = 3.2，GPU1 = 2.8<br>→ 全局 = √(3.2² + 2.8²) ≈ 4.25</p>
+        <h3>(4) 按参数分片汇总梯度范数</h3>
+        <p>完成梯度同步后，对互不重叠的参数梯度分片计算平方和，再跨持有这些分片的 rank 求和并开方。仅按序列切分，不能推出参数梯度也互不重叠。</p>
+        <p class="inset blue">例：两个不重叠分片的范数为 3.2 和 2.8<br>→ 全局 = √(3.2² + 2.8²) ≈ 4.25</p>
         <div class="grid two train-table center">
-          <div class="card green"><strong>GPU0</strong><br><code>grad_norm² = 10.24</code></div>
-          <div class="card green"><strong>GPU1</strong><br><code>grad_norm² = 7.84</code></div>
+          <div class="card green"><strong>参数分片 0</strong><br><code>grad_norm² = 10.24</code></div>
+          <div class="card green"><strong>参数分片 1</strong><br><code>grad_norm² = 7.84</code></div>
         </div>
         <p class="center">↓ All-Reduce(SUM)</p>
         <p class="strip blue">全局 grad_norm = 4.25</p>
@@ -323,7 +324,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere}
 
   <section class="summary" aria-labelledby="summary">
     <h2 id="summary">6. 一句话总结</h2><span class="star" aria-hidden="true">★</span>
-    <p><strong>SP 的本质是：非 Attention 层保持序列切分；进入 Attention 前通过 All-to-All 把布局切换成<br>「完整序列 + 部分头」；在本地完成 full-seq attention 后再切回「部分序列 + 全部头」；<br>而 loss、mask、梯度统计等特殊环节需要额外做跨 rank 对齐与汇总。</strong></p>
+    <p><strong>SP 的本质是：非 Attention 层保持序列切分；进入 Attention 前通过 All-to-All 把布局切换成<br>「完整序列 + 部分头」；在本地完成 full-seq attention 后再切回「部分序列 + 全部头」；<br>loss 和 mask 需要与全局序列对齐；梯度范数的汇总范围由参数梯度分片方式决定。</strong></p>
   </section>
 </main>
 </body>

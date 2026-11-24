@@ -256,7 +256,7 @@ code { font: 600 .87em/1.5 var(--mono); overflow-wrap: anywhere; }
         <thead><tr><th scope="col">操作或阶段</th><th scope="col">入口与调用</th></tr></thead>
         <tbody>
           <tr><th scope="row">TP AllReduce</th><td><code>Megatron _reduce() → dist.all_reduce() → ProcessGroupNCCL::allreduce() → ncclAllReduce()</code></td></tr>
-          <tr><th scope="row">EP All-to-All</th><td><code>all_to_all() → dist.all_to_all_single() → ProcessGroupNCCL::alltoall_base()</code><p>按构建与分片形态走原生 All-to-All，或分组提交 <code>ncclSend()</code> 与 <code>ncclRecv()</code>。</p></td></tr>
+          <tr><th scope="row">EP All-to-All</th><td><code>all_to_all() → dist.all_to_all_single() → ProcessGroupNCCL::alltoall_base()</code><p>本文所列 NCCL 2.27.7-1 没有原生 ncclAllToAll 接口，PyTorch 在这里分组提交 <code>ncclSend()</code> 与 <code>ncclRecv()</code>。</p></td></tr>
           <tr><th scope="row">NET 连接建立</th><td><code>sendSetup() / recvSetup() → ncclTopoGetNetDev() → ncclTopoCheckGdr()</code><p>NCCL 内置 IB 后端经 <code>regMr</code> 或 <code>regMrDmaBuf</code> 注册网卡使用的缓冲区。</p></td></tr>
           <tr><th scope="row">IB / RoCE 提交数据</th><td><code>ncclIbIsend() → ncclIbMultiSend() → wrap_ibv_post_send()</code><p>此实现用 RDMA Write 类请求。CUDA stream 依赖和接收完成由通信库协调。</p></td></tr>
         </tbody>
@@ -267,7 +267,7 @@ code { font: 600 .87em/1.5 var(--mono); overflow-wrap: anywhere; }
         <ul>
           <li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/Megatron-LM/blob/core_r0.16.0/megatron/core/tensor_parallel/mappings.py">Megatron Core 的 TP 和 All-to-All 入口</a></li>
           <li><a target="_blank" rel="noopener" href="https://github.com/pytorch/pytorch/blob/v2.9.0/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp">PyTorch ProcessGroupNCCL</a></li>
-          <li><a target="_blank" rel="noopener" href="https://github.com/pytorch/pytorch/blob/v2.9.0/torch/csrc/cuda/nccl.cpp#L831">PyTorch 的 All-to-All 提交</a></li>
+          <li><a target="_blank" rel="noopener" href="https://github.com/pytorch/pytorch/blob/v2.9.0/torch/csrc/cuda/nccl.cpp#L777-L859">PyTorch 的 All-to-All 提交</a></li>
           <li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/nccl/blob/v2.27.7-1/src/transport.cc#L14">NCCL 传输选择</a></li>
           <li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/nccl/blob/v2.27.7-1/src/transport/net.cc#L196">NCCL 网卡选择和 GDR 检查</a></li>
           <li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/nccl/blob/v2.27.7-1/src/transport/net_ib.cc#L2111">NCCL 内置 IB 后端</a></li>
