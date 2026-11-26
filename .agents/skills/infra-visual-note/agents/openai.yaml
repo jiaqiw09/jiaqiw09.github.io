@@ -1,0 +1,4 @@
+interface:
+  display_name: "工程图解讲义风（Infra Visual Note）"
+  short_description: "用统一静态样式编写技术原理、模型架构、数学推导和分布式系统图解"
+  default_prompt: "用 $infra-visual-note 把下面的技术主题写成一篇可离线阅读的工程图解讲义。"
