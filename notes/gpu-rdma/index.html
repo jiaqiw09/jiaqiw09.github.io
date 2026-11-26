@@ -3,192 +3,164 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="GPU 多卡互联与 RDMA 图解，涵盖硬件拓扑、网卡传输、NCCL 调用和验证。">
+  <meta name="description" content="从双节点硬件拓扑追踪 RDMA Write、NCCL 选路与实机验证。">
   <title>GPU 多卡互联与 RDMA</title>
   <link rel="stylesheet" href="../../assets/infra-visual-note.css">
 </head>
-<body class="ivn ivn-rdma">
-<main id="chapters" class="ivn-canvas">
-<header class="ivn-heading"><p class="ivn-kicker">GPU INTERCONNECT / RDMA</p><h1>GPU 多卡互联与 RDMA</h1><p class="ivn-deck">从节点拓扑读到 NCCL 调用与链路验证。</p><nav class="ivn-jump" aria-label="文章目录"><a href="#topology"><span class="ivn-jump-index">01</span>硬件拓扑</a><a href="#rdma"><span class="ivn-jump-index">02</span>RDMA 写入</a><a href="#paths"><span class="ivn-jump-index">03</span>传输路径</a><a href="#transport"><span class="ivn-jump-index">04</span>NCCL 选路</a><a href="#calls"><span class="ivn-jump-index">05</span>源码调用链</a><a href="#validation"><span class="ivn-jump-index">06</span>实机验证</a></nav><dl class="ivn-spec" aria-label="全局设定"><div><dt>拓扑</dt><dd>2 节点 · 每节点示意 2 张 GPU</dd></div><div><dt>跨机路径</dt><dd>IB / RoCE</dd></div><div><dt>调用链</dt><dd><code>Megatron Core 0.16 · PyTorch 2.9.0 · NCCL 2.27.7-1</code></dd></div></dl></header>
+<body class="ivn">
+<main class="ivn-canvas" id="chapters">
+  <header class="ivn-header" id="top">
+    <p class="ivn-kicker">GPU INTERCONNECT / RDMA</p>
+    <h1>GPU 多卡互联与 RDMA</h1>
+    <p class="ivn-subtitle">从双节点硬件拓扑追踪 RDMA Write、NCCL 选路与实机验证。</p>
+    <nav class="ivn-jump" aria-label="文章目录">
+      <a href="#topology"><span class="ivn-num">01</span>硬件拓扑</a>
+      <a href="#rdma"><span class="ivn-num">02</span>写入流水线</a>
+      <a href="#paths"><span class="ivn-num">03</span>路径与带宽</a>
+      <a href="#transport"><span class="ivn-num">04</span>NCCL 选路</a>
+      <a href="#calls"><span class="ivn-num">05</span>调用链</a>
+      <a href="#validation"><span class="ivn-num">06</span>实机排查</a>
+    </nav>
+    <dl class="ivn-spec" aria-label="全局设定">
+      <div><dt>拓扑</dt><dd>2 节点 · 每节点绘 2 GPU 与 1 NIC</dd></div>
+      <div><dt>跨机链路</dt><dd>IB / RoCE</dd></div>
+      <div><dt>链路线速参考</dt><dd>400 Gb/s</dd></div>
+      <div><dt>源码版本</dt><dd>Megatron Core 0.16 · PyTorch 2.9.0 · NCCL 2.27.7-1</dd></div>
+    </dl>
+  </header>
 
-    
-<section id="topology" aria-labelledby="topology-title" class="ivn-section">
-      <header class="chapter-header">
-        <h2 id="topology-title">硬件拓扑决定有哪些路可走</h2>
-        <p class="ivn-intro">拓扑描述 GPU、CPU、网卡和交换芯片如何连接。沿着路径可以看出经过几级交换、是否跨 NUMA、哪些设备共用链路。下图是两台服务器的示意，每台只画出 CPU 0 下的 PCIe 设备。</p>
-      </header>
-      <div role="region" aria-label="两台服务器的硬件拓扑" class="ivn-scroll" tabindex="0">
-      <figure class="topology ivn-module ivn-wide ivn-wide--dense" aria-label="两台服务器的 PCIe 拓扑与跨机网络">
-        <div class="node ivn-card" data-tone="blue">
-          <h3>节点 A</h3>
-          <div class="cpu-pair"><span class="device">CPU 0 + DRAM</span><span class="numa">NUMA</span><span class="device">CPU 1 + DRAM</span></div>
-          <span class="pcie-root">CPU 0 的 PCIe Root Complex</span>
-          <div class="device switch">PCIe Switch</div>
-          <div class="ports" aria-hidden="true"><span></span><span></span><span></span></div>
-          <div class="endpoints"><span class="device">GPU A0</span><span class="device">GPU A1</span><span class="device">网卡 A</span></div>
-          <p class="diagram-caption">A0 与 A1 可另走 NVLink / NVSwitch。</p>
-        </div>
-        <div class="network ivn-card" data-tone="purple">
-          <h3>IB / RoCE 网络</h3>
-          <span class="signal" aria-hidden="true"></span>
-          <small>网卡 A → 交换机 → 网卡 B</small>
-        </div>
-        <div class="node ivn-card" data-tone="blue">
-          <h3>节点 B</h3>
-          <div class="cpu-pair"><span class="device">CPU 0 + DRAM</span><span class="numa">NUMA</span><span class="device">CPU 1 + DRAM</span></div>
-          <span class="pcie-root">CPU 0 的 PCIe Root Complex</span>
-          <div class="device switch">PCIe Switch</div>
-          <div class="ports" aria-hidden="true"><span></span><span></span><span></span></div>
-          <div class="endpoints"><span class="device">网卡 B</span><span class="device">GPU B0</span><span class="device">GPU B1</span></div>
-          <p class="diagram-caption">B0 与 B1 可另走 NVLink / NVSwitch。</p>
-        </div>
-      </figure>
+  <section class="ivn-section" id="topology">
+    <header class="ivn-sec-head"><span class="ivn-sec-index">01</span><h2 id="topology-title">双节点硬件拓扑与互联层级</h2></header>
+    <p class="ivn-lead">拓扑把 GPU、CPU、网卡与交换芯片连成可追踪的路径。要判断一次搬运跨几级交换和 NUMA，先找每张卡所归属的 PCIe Root Complex。</p>
+    <div class="ivn-scroll" data-width="860" role="region" aria-label="双服务器硬件拓扑" tabindex="0">
+      <figure>
+      <svg viewBox="0 0 1120 380" role="img" aria-labelledby="topo-svg-title topo-svg-desc" xmlns="http://www.w3.org/2000/svg">
+        <title id="topo-svg-title">双服务器 PCIe、NVLink 与 RDMA 拓扑</title>
+        <desc id="topo-svg-desc">两台服务器各有两个 NUMA 节点。CPU 0 下的一颗 PCIe Switch 连接两张 GPU 和一张 RDMA 网卡。GPU 可走机内绿色 NVLink 旁路，源端网卡与远端网卡通过紫色 IB 或 RoCE 网络交换机相连。</desc>
+        <defs><marker id="topo-ib-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L8 4L0 8z" fill="var(--ivn-purple)"/></marker></defs>
+      <rect x="12" y="12" width="410" height="352" rx="6" fill="var(--ivn-surface)" stroke="var(--ivn-rule)"/><text x="217" y="37" text-anchor="middle" font-size="17" fill="var(--ivn-ink)" font-weight="600">节点 A</text><path d="M103 78 L331 78" fill="none" stroke="var(--ivn-muted)" stroke-width="1" stroke-dasharray="6 5"/><path d="M103 98 L103 126" fill="none" stroke="var(--ivn-blue)" stroke-width="1"/><path d="M217 154 L217 176" fill="none" stroke="var(--ivn-blue)" stroke-width="1"/><path d="M217 204 L217 227" fill="none" stroke="var(--ivn-blue)" stroke-width="1"/><path d="M217 227 L88 227 L88 248" fill="none" stroke="var(--ivn-blue)" stroke-width="1"/><path d="M217 227 L210 227 L210 248" fill="none" stroke="var(--ivn-blue)" stroke-width="1"/><path d="M217 227 L350 227 L350 248" fill="none" stroke="var(--ivn-blue)" stroke-width="1"/><path d="M88 284 L88 310 L210 310 L210 284" fill="none" stroke="var(--ivn-green)" stroke-width="2" stroke-dasharray="6 5"/><rect x="37" y="61" width="132" height="37" rx="6" fill="var(--ivn-subtle)" stroke="var(--ivn-rule)"/><text x="103.0" y="84.5" text-anchor="middle" font-size="13" fill="var(--ivn-ink)" font-weight="600">CPU 0 · DRAM</text><rect x="265" y="61" width="132" height="37" rx="6" fill="var(--ivn-subtle)" stroke="var(--ivn-rule)"/><text x="331.0" y="84.5" text-anchor="middle" font-size="13" fill="var(--ivn-ink)" font-weight="600">CPU 1 · DRAM</text><rect x="90" y="126" width="254" height="28" rx="6" fill="var(--ivn-subtle)" stroke="var(--ivn-rule)"/><text x="217.0" y="145.0" text-anchor="middle" font-size="13" fill="var(--ivn-ink)" font-weight="600">CPU 0 · PCIe Root Complex</text><rect x="131" y="176" width="172" height="28" rx="6" fill="var(--ivn-blue-soft)" stroke="var(--ivn-blue-line)"/><text x="217.0" y="195.0" text-anchor="middle" font-size="13" fill="var(--ivn-ink)" font-weight="600">PCIe Switch</text><rect x="40" y="248" width="96" height="36" rx="6" fill="var(--ivn-blue-soft)" stroke="var(--ivn-blue-line)"/><text x="88.0" y="271.0" text-anchor="middle" font-size="13" fill="var(--ivn-ink)" font-weight="600">GPU A0</text><rect x="162" y="248" width="96" height="36" rx="6" fill="var(--ivn-blue-soft)" stroke="var(--ivn-blue-line)"/><text x="210.0" y="271.0" text-anchor="middle" font-size="13" fill="var(--ivn-ink)" font-weight="600">GPU A1</text><rect x="302" y="248" width="96" height="36" rx="6" fill="var(--ivn-purple-soft)" stroke="var(--ivn-purple-line)"/><text x="350.0" y="271.0" text-anchor="middle" font-size="13" fill="var(--ivn-purple)" font-weight="600">RDMA NIC A</text><text x="216" y="72" text-anchor="middle" font-size="11" fill="var(--ivn-muted)" font-weight="600">NUMA</text><text x="149.0" y="332" text-anchor="middle" font-size="12" fill="var(--ivn-green)" font-weight="600">NVLink / NVSwitch 旁路</text><rect x="698" y="12" width="410" height="352" rx="6" fill="var(--ivn-surface)" stroke="var(--ivn-rule)"/><text x="903" y="37" text-anchor="middle" font-size="17" fill="var(--ivn-ink)" font-weight="600">节点 B</text><path d="M789 78 L1017 78" fill="none" stroke="var(--ivn-muted)" stroke-width="1" stroke-dasharray="6 5"/><path d="M789 98 L789 126" fill="none" stroke="var(--ivn-blue)" stroke-width="1"/><path d="M903 154 L903 176" fill="none" stroke="var(--ivn-blue)" stroke-width="1"/><path d="M903 204 L903 227" fill="none" stroke="var(--ivn-blue)" stroke-width="1"/><path d="M903 227 L896 227 L896 248" fill="none" stroke="var(--ivn-blue)" stroke-width="1"/><path d="M903 227 L1036 227 L1036 248" fill="none" stroke="var(--ivn-blue)" stroke-width="1"/><path d="M903 227 L774 227 L774 248" fill="none" stroke="var(--ivn-blue)" stroke-width="1"/><path d="M896 284 L896 310 L1036 310 L1036 284" fill="none" stroke="var(--ivn-green)" stroke-width="2" stroke-dasharray="6 5"/><rect x="723" y="61" width="132" height="37" rx="6" fill="var(--ivn-subtle)" stroke="var(--ivn-rule)"/><text x="789.0" y="84.5" text-anchor="middle" font-size="13" fill="var(--ivn-ink)" font-weight="600">CPU 0 · DRAM</text><rect x="951" y="61" width="132" height="37" rx="6" fill="var(--ivn-subtle)" stroke="var(--ivn-rule)"/><text x="1017.0" y="84.5" text-anchor="middle" font-size="13" fill="var(--ivn-ink)" font-weight="600">CPU 1 · DRAM</text><rect x="776" y="126" width="254" height="28" rx="6" fill="var(--ivn-subtle)" stroke="var(--ivn-rule)"/><text x="903.0" y="145.0" text-anchor="middle" font-size="13" fill="var(--ivn-ink)" font-weight="600">CPU 0 · PCIe Root Complex</text><rect x="817" y="176" width="172" height="28" rx="6" fill="var(--ivn-blue-soft)" stroke="var(--ivn-blue-line)"/><text x="903.0" y="195.0" text-anchor="middle" font-size="13" fill="var(--ivn-ink)" font-weight="600">PCIe Switch</text><rect x="848" y="248" width="96" height="36" rx="6" fill="var(--ivn-blue-soft)" stroke="var(--ivn-blue-line)"/><text x="896.0" y="271.0" text-anchor="middle" font-size="13" fill="var(--ivn-ink)" font-weight="600">GPU B0</text><rect x="988" y="248" width="96" height="36" rx="6" fill="var(--ivn-blue-soft)" stroke="var(--ivn-blue-line)"/><text x="1036.0" y="271.0" text-anchor="middle" font-size="13" fill="var(--ivn-ink)" font-weight="600">GPU B1</text><rect x="726" y="248" width="96" height="36" rx="6" fill="var(--ivn-purple-soft)" stroke="var(--ivn-purple-line)"/><text x="774.0" y="271.0" text-anchor="middle" font-size="13" fill="var(--ivn-purple)" font-weight="600">RDMA NIC B</text><text x="902" y="72" text-anchor="middle" font-size="11" fill="var(--ivn-muted)" font-weight="600">NUMA</text><text x="966.0" y="332" text-anchor="middle" font-size="12" fill="var(--ivn-green)" font-weight="600">NVLink / NVSwitch 旁路</text><path d="M398 266 L477 266" fill="none" stroke="var(--ivn-purple)" stroke-width="2" marker-end="url(#topo-ib-arrow)"/><path d="M643 266 L726 266" fill="none" stroke="var(--ivn-purple)" stroke-width="2" marker-end="url(#topo-ib-arrow)"/><rect x="477" y="246" width="166" height="40" rx="6" fill="var(--ivn-purple-soft)" stroke="var(--ivn-purple-line)"/><text x="560" y="263" text-anchor="middle" font-size="14" fill="var(--ivn-purple)" font-weight="600">IB / RoCE</text><text x="560" y="279" text-anchor="middle" font-size="11" fill="var(--ivn-purple)" font-weight="600">网络交换机</text></svg><figcaption>蓝线为 PCIe，绿虚线为同机 GPU 高速旁路，紫实线为跨机网络。每台节点只绘出 CPU 0 下的 PCIe 设备。</figcaption></figure>
+    </div>
+    <div class="ivn-scroll" data-width="860" role="region" aria-label="三种互联层级" tabindex="0">
+      <div class="ivn-grid-3">
+        <article class="ivn-card" data-tone="blue"><span class="ivn-badge" data-tone="blue">01 主机与设备</span><h3>CPU ↔ GPU</h3><p>常见分立 GPU 使用 PCIe。GH200 的 Grace ↔ Hopper 可用 NVLink-C2C 实现一致性内存访问。</p></article>
+        <article class="ivn-card" data-tone="purple"><span class="ivn-badge" data-tone="purple">02 同机互联</span><h3>同机 GPU ↔ GPU</h3><p>可经 PCIe P2P、NVLink 直连或 NVSwitch。交换芯片按目标端口转发。</p></article>
+        <article class="ivn-card" data-tone="purple"><span class="ivn-badge" data-tone="purple">03 跨机互联</span><h3>跨机 GPU ↔ GPU</h3><p>本机 GPU ↔ NIC、IB/RoCE 网络、对端 NIC ↔ GPU 是三个可单独核对的区段。</p></article>
       </div>
-      <div role="region" aria-label="通信方式对照" class="ivn-scroll" tabindex="0">
-      <div class="card-grid ivn-module ivn-wide ivn-wide--dense">
-        <div class="ivn-card" data-tone="blue"><h3>CPU ↔ GPU</h3><p>常见分立 GPU 经 PCIe。GH200 的 Grace ↔ Hopper 经 NVLink-C2C，支持一致性内存访问。</p></div>
-        <div class="ivn-card" data-tone="purple"><h3>同机 GPU ↔ GPU</h3><p>可经 PCIe P2P、NVLink 直连或 NVSwitch。交换芯片按目标端口转发。</p></div>
-        <div class="ivn-card" data-tone="purple"><h3>跨机 GPU ↔ GPU</h3><p>常见路径包含本机 GPU ↔ 网卡、IB / RoCE 网络、对端网卡 ↔ GPU 三段。</p></div>
-      </div>
-      </div>
-      <div class="ivn-callout" data-tone="amber"><p><strong class="ivn-label">共享带宽</strong>　同一颗 PCIe Switch 下的 GPU 与网卡可以在支持时直接 P2P。多个下行设备同时访问主机内存时，可能共用 Switch 上行链路。</p></div>
-    </section>
+    </div>
+    <p class="ivn-callout" data-tone="amber"><strong class="ivn-callout-tag">共享带宽 ·</strong>同一 PCIe Switch 下的设备在支持时可直接 P2P。多个下行设备访问主机内存时，可能共用 Switch 上行链路。</p>
+  </section>
 
-
-    
-<section id="rdma" aria-labelledby="rdma-title" class="ivn-section">
-      <header class="chapter-header">
-        <h2 id="rdma-title">RDMA 让网卡直接访问远端缓冲区</h2>
-        <p class="ivn-intro">一次 RDMA Write 从准备缓冲区开始，经过连接建立、提交、搬运和完成同步。沿着下面的流程核对哪些操作由 CPU 发起，哪些数据由设备搬运。</p>
-      </header>
-      <div role="region" aria-label="通信方式对照" class="ivn-scroll" tabindex="0">
-      <div class="card-grid ivn-module ivn-wide ivn-wide--dense">
-        <div class="ivn-card" data-tone="blue"><h3>DMA · 本机</h3><p>设备按命令读写本机内存。例如网卡用 DMA 从 DRAM 读取待发数据。</p></div>
-        <div class="ivn-card" data-tone="purple"><h3>RDMA · 跨机</h3><p>网卡执行读写请求，按对端授权访问已注册的内存。InfiniBand 和 RoCE 都可承载 RDMA。</p></div>
-        <div class="ivn-card" data-tone="green"><h3>GPUDirect RDMA · GPU 显存</h3><p>通信库可以把 GPU 显存注册给网卡，网卡即可通过本机 PCIe 直接读取或写入它。</p></div>
+  <section class="ivn-section" id="rdma">
+    <header class="ivn-sec-head"><span class="ivn-sec-index">02</span><h2 id="rdma-title">RDMA Write 机制与五步硬件流水线</h2></header>
+    <p class="ivn-lead">RDMA Write 从注册缓冲区开始，经过建连、提交、搬运和完成同步。按流水线分清哪些操作由 CPU 发起，哪些字节由设备直接搬运。</p>
+    <div class="ivn-scroll" data-width="860" role="region" aria-label="DMA、RDMA 与 GPUDirect RDMA 对照" tabindex="0">
+      <div class="ivn-grid-3">
+        <article class="ivn-card" data-tone="blue"><span class="ivn-badge" data-tone="blue">本地搬运</span><h3>DMA · 本机</h3><p>设备按命令读写本机内存。例如网卡从 DRAM DMA 读取待发数据。</p></article>
+        <article class="ivn-card" data-tone="purple"><span class="ivn-badge" data-tone="purple">跨机直连</span><h3>RDMA · 跨机</h3><p>网卡按对端授权读写已注册内存。InfiniBand 和 RoCE 都可承载 RDMA。</p></article>
+        <article class="ivn-card" data-tone="green"><span class="ivn-badge" data-tone="green">显存直达</span><h3>GPUDirect RDMA · 显存</h3><p>GPU 显存可被注册给网卡，网卡经本机 PCIe 直接读写，不需要显式在 Host DRAM 中转。</p></article>
       </div>
-      </div>
-      <div role="region" aria-label="RDMA Write 五步流程" class="ivn-scroll" tabindex="0">
-      <ol class="steps ivn-module ivn-wide ivn-wide--dense ivn-pipeline">
-        <li class="step ivn-card" data-tone="blue"><h3><span class="ivn-label">01</span> 注册缓冲区</h3><code>ibv_reg_mr()</code><p>注册地址范围和访问权限，得到内存区域（MR）。</p></li>
-        <li class="step ivn-card" data-tone="blue"><h3><span class="ivn-label">02</span> 建立连接</h3><code>ibv_create_qp()</code><p>建立和配置队列对（QP），交换远端缓冲区地址和访问钥匙 <code class="inline-key">rkey</code>。</p></li>
-        <li class="step ivn-card" data-tone="blue"><h3><span class="ivn-label">03</span> 提交写请求</h3><code>ibv_post_send()</code><p>提供本地地址、lkey、长度、远端地址和 rkey。</p></li>
-        <li class="step ivn-card" data-tone="purple"><h3><span class="ivn-label">04</span> 网卡搬数据</h3><code>PCIe DMA → IB / RoCE</code><p>源网卡 DMA 读，经网络送到目标网卡。目标网卡校验权限后 DMA 写。</p></li>
-        <li class="step ivn-card" data-tone="green"><h3><span class="ivn-label">05</span> 完成与同步</h3><code>ibv_poll_cq()</code><p>查询请求完成。接收端按协议获知何时可以消费数据，并与 GPU stream 协调。</p></li>
+    </div>
+    <div class="ivn-scroll" data-width="860" role="region" aria-label="RDMA Write 五步流水线" tabindex="0">
+      <ol class="ivn-pipeline" data-steps="5">
+        <li class="ivn-card" data-tone="blue"><span class="ivn-badge" data-tone="blue">01</span><h3>注册缓冲区</h3><code>ibv_reg_mr()</code><p>登记地址范围与权限，获得 Memory Region。</p></li>
+        <li class="ivn-card" data-tone="blue"><span class="ivn-badge" data-tone="blue">02</span><h3>建连交换 rkey</h3><code>ibv_create_qp()</code><p>建立并配置 QP，交换远端地址和访问钥匙 rkey。</p></li>
+        <li class="ivn-card" data-tone="blue"><span class="ivn-badge" data-tone="blue">03</span><h3>提交写请求</h3><code>ibv_post_send()</code><p>提供本地地址、lkey、长度、远端地址和 rkey。</p></li>
+        <li class="ivn-card" data-tone="purple"><span class="ivn-badge" data-tone="purple">04 网络传输</span><h3>网卡 DMA 搬运</h3><code>PCIe DMA → IB/RoCE</code><p>源网卡 DMA 读，目标网卡校验后 DMA 写。</p></li>
+        <li class="ivn-card" data-tone="green"><span class="ivn-badge" data-tone="green">05 完成</span><h3>完成队列同步</h3><code>ibv_poll_cq()</code><p>查询请求完成。接收端按协议确认可消费时机，并与 GPU stream 协调。</p></li>
       </ol>
-      </div>
-      <div class="ivn-callout" data-tone="amber"><p><strong class="ivn-label">CPU 的角色</strong>　应用或通信库负责注册、提交与协调，Tensor 字节由设备搬运。普通 RDMA Write 需要协议配合，才能通知接收应用何时读取。</p></div>
-    </section>
+    </div>
+    <p class="ivn-callout" data-tone="amber"><strong class="ivn-callout-tag">CPU 的角色 ·</strong>应用或通信库负责注册、提交与协调，Tensor 字节由设备搬运。普通 RDMA Write 需要额外协议通知接收端何时读取。</p>
+  </section>
 
-
-    
-<section id="paths" aria-labelledby="paths-title" class="ivn-section">
-      <header class="chapter-header">
-        <h2 id="paths-title">同一个跨机 Tensor 可以走不同路径</h2>
-        <p class="ivn-intro">节点 A 的 GPU A0 发给节点 B 的 GPU B0。网卡之间保持 RDMA 时，两端仍可分别决定是否经过主机内存。</p>
-      </header>
-      <div role="region" aria-label="跨机传输路径表" class="ivn-scroll" tabindex="0">
-      <table class="data-table paths ivn-module ivn-wide ivn-wide--dense ivn-ledger">
-        <colgroup><col><col><col></colgroup>
-        <thead><tr><th scope="col">传输方式</th><th scope="col">Tensor 数据路径</th><th scope="col">主机内存中转</th></tr></thead>
+  <section class="ivn-section" id="paths">
+    <header class="ivn-sec-head"><span class="ivn-sec-index">03</span><h2 id="paths-title">跨机 Tensor 传输路径与带宽代价账本</h2></header>
+    <p class="ivn-lead">发送卡与接收卡之间保留同一条跨机 RDMA 链路。任一端失去 GPUDirect 能力时，该端路径可退到 Host DRAM 中转。</p>
+    <div class="ivn-scroll" data-width="860" role="region" aria-label="同一 A0→B0 Tensor 的端到端路径；吞吐为理论参考，需用 payload 实测验证" tabindex="0">
+      <table class="ivn-ledger">
+        <caption>同一 A0→B0 Tensor 的端到端路径；吞吐为理论参考，需用 payload 实测验证</caption>
+        <thead><tr><th scope="col">传输方式</th><th scope="col">完整硬件数据路径</th><th scope="col">Host DRAM 中转</th><th class="ivn-num-col" scope="col">跨端 PCIe 数据传输</th><th class="ivn-num-col" scope="col">典型有效带宽量级参考</th></tr></thead>
         <tbody>
-          <tr><th scope="row">双端 GPUDirect RDMA</th><td><code>GPU A0 → 网卡 A → IB/RoCE → 网卡 B → GPU B0</code></td><td><span class="tag">无中转</span></td></tr>
-          <tr><th scope="row">仅发送端 GPUDirect</th><td><code>GPU A0 → 网卡 A → IB/RoCE → 网卡 B → 主机 B → GPU B0</code></td><td><span class="tag-amber">接收端中转</span></td></tr>
-          <tr><th scope="row">仅接收端 GPUDirect</th><td><code>GPU A0 → 主机 A → 网卡 A → IB/RoCE → 网卡 B → GPU B0</code></td><td><span class="tag-amber">发送端中转</span></td></tr>
-          <tr><th scope="row">RDMA 经主机内存</th><td><code>GPU A0 → 主机 A → 网卡 A → IB/RoCE → 网卡 B → 主机 B → GPU B0</code></td><td><span class="tag-purple">双端中转</span></td></tr>
-          <tr><th scope="row">TCP Socket</th><td><code>GPU A0 → 主机 A → TCP/IP → 主机 B → GPU B0</code></td><td><span class="tag-amber">双端中转</span></td></tr>
+          <tr data-tone="green"><td>双端 GPUDirect RDMA</td><td><code>GPU A0 → NIC A → IB/RoCE → NIC B → GPU B0</code></td><td><span class="ivn-badge" data-tone="green">无中转</span></td><td class="ivn-num-col">2（1+1）</td><td class="ivn-num-col">400 Gb/s IB 单向线速约 50 GB/s；有效 payload 低于线速</td></tr>
+          <tr><td>仅发送端 GPUDirect</td><td><code>GPU A0 → NIC A → IB/RoCE → NIC B → DRAM B → GPU B0</code></td><td><span class="ivn-badge" data-tone="amber">接收端中转</span></td><td class="ivn-num-col">3（1+2）</td><td class="ivn-num-col">上界取 50 GB/s 与接收端 PCIe/DRAM 路径较小者</td></tr>
+          <tr><td>仅接收端 GPUDirect</td><td><code>GPU A0 → DRAM A → NIC A → IB/RoCE → NIC B → GPU B0</code></td><td><span class="ivn-badge" data-tone="amber">发送端中转</span></td><td class="ivn-num-col">3（2+1）</td><td class="ivn-num-col">上界取 50 GB/s 与发送端 PCIe/DRAM 路径较小者</td></tr>
+          <tr><td>RDMA 经主机内存</td><td><code>GPU A0 → DRAM A → NIC A → IB/RoCE → NIC B → DRAM B → GPU B0</code></td><td><span class="ivn-badge" data-tone="amber">双端中转</span></td><td class="ivn-num-col">4（2+2）</td><td class="ivn-num-col">同一网络线速；主机内存带宽、流水重叠和 NUMA 决定实际结果</td></tr>
+          <tr><td>TCP Socket</td><td><code>GPU A0 → DRAM A → NIC A → TCP/IP → NIC B → DRAM B → GPU B0</code></td><td><span class="ivn-badge" data-tone="red">双端中转</span></td><td class="ivn-num-col">4（2+2）</td><td class="ivn-num-col">依以太网线速、CPU 和协议栈而定</td></tr>
         </tbody>
       </table>
+    </div>
+    <p class="ivn-callout" data-tone="amber"><strong class="ivn-callout-tag">计量口径 ·</strong>一次 PCIe 数据传输指一次设备 ↔ CPU 或设备 ↔ 设备的数据移动，Switch 内部物理链路不重复计数。400 ÷ 8 = 50 GB/s 是线速上限，实际带宽受拓扑、MTU、协议和重叠影响。</p>
+  </section>
+
+  <section class="ivn-section" id="transport">
+    <header class="ivn-sec-head"><span class="ivn-sec-index">04</span><h2 id="transport-title">NCCL 按连接选路逻辑</h2></header>
+    <p class="ivn-lead">训练框架先划分 Rank 组，NCCL 再按拓扑和连接能力组织 channel。选路粒度是每条收发连接。</p>
+    <div class="ivn-scroll" data-width="860" role="region" aria-label="NCCL 连接级传输选择" tabindex="0">
+      <div class="ivn-grid-2">
+        <article class="ivn-card" data-tone="blue"><span class="ivn-badge" data-tone="blue">按连接选择</span><h3>入口契约</h3><code>selectTransport() → canConnect() → setup()</code><p>对每条收发连接判断可用能力，从上到下检查右侧条件。</p></article>
+        <div><article class="ivn-card" data-tone="green"><span class="ivn-badge" data-tone="green">01 P2P</span><h3>P2P 可用</h3><code>p2pCanConnect() → p2pSendSetup() / p2pRecvSetup()</code><p>GPU 通常经 NVLink 或 PCIe 直接互访。</p></article><article class="ivn-card" data-tone="amber"><span class="ivn-badge" data-tone="amber">02 SHM</span><h3>P2P 未选中，SHM 可用</h3><code>shmCanConnect() → shmSendSetup() / shmRecvSetup()</code><p>通过共享主机缓冲区交换。</p></article><article class="ivn-card" data-tone="purple"><span class="ivn-badge" data-tone="purple">03 NET IB/GDR/Socket</span><h3>P2P 与 SHM 未选中，NET 可用</h3><p>IB / RoCE 可分别判断发送端、接收端 GDR 能力。Socket 使用主机缓冲区。</p></article></div>
       </div>
-      <div class="ivn-callout" data-tone="blue"><p><strong class="ivn-label">例子</strong>　双端 GDR 时，源网卡经本机 PCIe 读取 GPU A0 的显存，对端网卡经自己的 PCIe 路径写入 GPU B0 的显存。</p></div>
-    </section>
+    </div>
+    <p class="ivn-callout" data-tone="blue"><strong class="ivn-callout-tag">按连接选 ·</strong>同一次 All-to-All 可在机内走 P2P，在跨机连接走 NET。专用传输和网络插件可能改写常见路径。</p>
+  </section>
 
+  <section class="ivn-section" id="calls">
+    <header class="ivn-sec-head"><span class="ivn-sec-index">05</span><h2 id="calls-title">从训练接口到网卡提交的源码调用链</h2></header>
+    <p class="ivn-lead">这里固定 Megatron Core 0.16、PyTorch 2.9.0 和 NCCL 2.27.7-1。表内分别列出训练提交、连接初始化和真正向网卡提交的入口。</p>
+    <div class="ivn-scroll" data-width="860" role="region" aria-label="Megatron Core → PyTorch c10d → NCCL → libibverbs" tabindex="0">
+      <table class="ivn-ledger">
+              <caption>Megatron Core → PyTorch c10d → NCCL → libibverbs</caption><thead><tr><th scope="col">操作或阶段</th><th scope="col">入口与调用</th></tr></thead>
+              <tbody>
+                <tr><th scope="row">TP AllReduce</th><td><code>Megatron _reduce() → dist.all_reduce() → ProcessGroupNCCL::allreduce() → ncclAllReduce()</code></td></tr>
+                <tr><th scope="row">EP All-to-All</th><td><code>all_to_all() → dist.all_to_all_single() → ProcessGroupNCCL::alltoall_base()</code><p>本文所列 NCCL 2.27.7-1 没有原生 ncclAllToAll 接口，PyTorch 在这里分组提交 <code>ncclSend()</code> 与 <code>ncclRecv()</code>。</p></td></tr>
+                <tr><th scope="row">NET 连接建立</th><td><code>sendSetup() / recvSetup() → ncclTopoGetNetDev() → ncclTopoCheckGdr()</code><p>NCCL 内置 IB 后端经 <code>regMr</code> 或 <code>regMrDmaBuf</code> 注册网卡使用的缓冲区。</p></td></tr>
+                <tr><th scope="row">IB / RoCE 提交数据</th><td><code>ncclIbIsend() → ncclIbMultiSend() → wrap_ibv_post_send()</code><p>此实现用 RDMA Write 类请求。CUDA stream 依赖和接收完成由通信库协调。</p></td></tr>
+              </tbody>
+            </table>
+    </div>
+    <details>
+            <summary>查看对应源码</summary>
+            <ul>
+              <li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/Megatron-LM/blob/core_r0.16.0/megatron/core/tensor_parallel/mappings.py">Megatron Core 的 TP 和 All-to-All 入口</a></li>
+              <li><a target="_blank" rel="noopener" href="https://github.com/pytorch/pytorch/blob/v2.9.0/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp">PyTorch ProcessGroupNCCL</a></li>
+              <li><a target="_blank" rel="noopener" href="https://github.com/pytorch/pytorch/blob/v2.9.0/torch/csrc/cuda/nccl.cpp#L777-L859">PyTorch 的 All-to-All 提交</a></li>
+              <li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/nccl/blob/v2.27.7-1/src/transport.cc#L14">NCCL 传输选择</a></li>
+              <li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/nccl/blob/v2.27.7-1/src/transport/net.cc#L196">NCCL 网卡选择和 GDR 检查</a></li>
+              <li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/nccl/blob/v2.27.7-1/src/transport/net_ib.cc#L2111">NCCL 内置 IB 后端</a></li>
+            </ul>
+          </details>
+  </section>
 
-    
-<section id="transport" aria-labelledby="transport-title" class="ivn-section">
-      <header class="chapter-header">
-        <h2 id="transport-title">NCCL 按连接选择传输</h2>
-        <p class="ivn-intro">训练框架划分 rank 组。NCCL 根据拓扑和可用能力组织 channel，为每条收发连接设置传输。</p>
-      </header>
-      <div role="region" aria-label="NCCL 传输选择图" class="ivn-scroll" tabindex="0">
-      <figure class="decision ivn-module ivn-wide ivn-wide--dense" aria-label="NCCL 的 P2P、共享内存和网络传输选择">
-        <div class="root ivn-card"><h3><code>selectTransport()</code></h3><p>检查传输的 <code>canConnect()</code>，选中后执行对应的 <code>setup()</code>。</p></div>
-        <ol class="branches">
-          <li class="ivn-card" data-tone="purple"><h3>P2P 可用</h3><p><code>p2pCanConnect()</code> → <code>p2pSendSetup()</code> / <code>p2pRecvSetup()</code>。GPU 互访通常经 NVLink 或 PCIe。</p></li>
-          <li class="ivn-card" data-tone="purple"><h3>P2P 未选中，SHM 可用</h3><p><code>shmCanConnect()</code> → <code>shmSendSetup()</code> / <code>shmRecvSetup()</code>。两张卡使用共享主机缓冲区。</p></li>
-          <li class="ivn-card" data-tone="purple"><h3>P2P 和 SHM 未选中，NET 可用</h3><p>IB / RoCE 等后端可分别检查发送端和接收端的 GDR。Socket 使用主机缓冲区。</p></li>
-        </ol>
-      </figure>
-      </div>
-      <div class="ivn-callout" data-tone="blue"><p><strong class="ivn-label">按连接选</strong>　同一次 All-to-All 可以在机内连接上走 P2P，在跨机连接上走 NET。平台专用传输和网络插件可以改变具体路径。</p></div>
-    </section>
+  <section class="ivn-section" id="validation">
+    <header class="ivn-sec-head"><span class="ivn-sec-index">06</span><h2 id="validation-title">实机逐层排查命令账本</h2></header>
+    <p class="ivn-lead">先看设备互访能力，再检查实际训练选中的网卡与传输。先测通主机缓冲区 RDMA，再验证 GPU 缓冲区可被网卡直接访问。</p>
+    <div class="ivn-scroll" data-width="860" role="region" aria-label="设备拓扑、P2P、RDMA 和训练通信逐层核对" tabindex="0">
+      <table class="ivn-ledger">
+              <caption>设备拓扑、P2P、RDMA 和训练通信逐层核对</caption><thead><tr><th scope="col">检查项</th><th scope="col">命令或工具</th><th scope="col">核对内容</th></tr></thead>
+              <tbody>
+                <tr><th scope="row">看硬件拓扑</th><td><code>nvidia-smi topo -m</code>、<code>lspci -tv</code></td><td>确认 GPU ↔ GPU、GPU ↔ NIC 的路径和 NUMA。</td></tr>
+                <tr><th scope="row">测同机 P2P</th><td><code>nvidia-smi topo -p2p p</code>、<code>nvbandwidth</code></td><td>核对 P2P 能力，再实测 GPU 互访带宽。</td></tr>
+                <tr><th scope="row">测跨机 RDMA</th><td><code>rdma link</code>、<code>ibv_devinfo</code>、<code>ib_write_bw</code></td><td>先测主机缓冲区，再用支持 CUDA 的 perftest 测 GPU 缓冲区。</td></tr>
+                <tr><th scope="row">复现训练通信</th><td><code>NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT,NET,GRAPH</code></td><td>核对网卡和传输，再用相同 GPU 分组的 NCCL Tests 实测。</td></tr>
+              </tbody>
+            </table>
+    </div>
+    <p class="ivn-callout" data-tone="blue"><strong class="ivn-callout-tag">配置归属 ·</strong>整机布线决定拓扑。宿主机驱动与平台所需的 Fabric Manager / NVLSM 初始化互联；网卡驱动、IB/RoCE，以及 DMA-BUF 或 nvidia-peermem 支撑 GDR。</p>
+    <details>
+            <summary>查看 NVIDIA 参考文档</summary>
+            <ul>
+              <li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/deploy/nvidia-smi/index.html">nvidia-smi 拓扑命令</a></li>
+              <li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/gpudirect-rdma/index.html">GPUDirect RDMA</a></li>
+              <li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/troubleshooting.html">NCCL 排查指南</a></li>
+              <li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/datacenter/tesla/fabric-manager-user-guide/">Fabric Manager</a></li>
+              <li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/nccl-tests">NCCL Tests</a></li>
+            </ul>
+          </details>
+  </section>
 
-
-    
-<section id="calls" aria-labelledby="calls-title" class="ivn-section">
-      <header class="chapter-header">
-        <h2 id="calls-title">从训练接口追到网卡提交函数</h2>
-        <p class="ivn-intro">源码示例使用 Megatron Core 0.16、PyTorch 2.9.0 和 NCCL 2.27.7-1，涉及训练提交、连接建立和数据传输三个阶段。</p>
-      </header>
-      <div role="region" aria-label="NCCL 调用链表" class="ivn-scroll" tabindex="0">
-      <table class="data-table calls ivn-module ivn-wide ivn-wide--dense ivn-ledger">
-        <colgroup><col><col></colgroup>
-        <thead><tr><th scope="col">操作或阶段</th><th scope="col">入口与调用</th></tr></thead>
-        <tbody>
-          <tr><th scope="row">TP AllReduce</th><td><code>Megatron _reduce() → dist.all_reduce() → ProcessGroupNCCL::allreduce() → ncclAllReduce()</code></td></tr>
-          <tr><th scope="row">EP All-to-All</th><td><code>all_to_all() → dist.all_to_all_single() → ProcessGroupNCCL::alltoall_base()</code><p>本文所列 NCCL 2.27.7-1 没有原生 ncclAllToAll 接口，PyTorch 在这里分组提交 <code>ncclSend()</code> 与 <code>ncclRecv()</code>。</p></td></tr>
-          <tr><th scope="row">NET 连接建立</th><td><code>sendSetup() / recvSetup() → ncclTopoGetNetDev() → ncclTopoCheckGdr()</code><p>NCCL 内置 IB 后端经 <code>regMr</code> 或 <code>regMrDmaBuf</code> 注册网卡使用的缓冲区。</p></td></tr>
-          <tr><th scope="row">IB / RoCE 提交数据</th><td><code>ncclIbIsend() → ncclIbMultiSend() → wrap_ibv_post_send()</code><p>此实现用 RDMA Write 类请求。CUDA stream 依赖和接收完成由通信库协调。</p></td></tr>
-        </tbody>
-      </table>
-      </div>
-      <details class="sources">
-        <summary>查看对应源码</summary>
-        <ul>
-          <li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/Megatron-LM/blob/core_r0.16.0/megatron/core/tensor_parallel/mappings.py">Megatron Core 的 TP 和 All-to-All 入口</a></li>
-          <li><a target="_blank" rel="noopener" href="https://github.com/pytorch/pytorch/blob/v2.9.0/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp">PyTorch ProcessGroupNCCL</a></li>
-          <li><a target="_blank" rel="noopener" href="https://github.com/pytorch/pytorch/blob/v2.9.0/torch/csrc/cuda/nccl.cpp#L777-L859">PyTorch 的 All-to-All 提交</a></li>
-          <li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/nccl/blob/v2.27.7-1/src/transport.cc#L14">NCCL 传输选择</a></li>
-          <li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/nccl/blob/v2.27.7-1/src/transport/net.cc#L196">NCCL 网卡选择和 GDR 检查</a></li>
-          <li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/nccl/blob/v2.27.7-1/src/transport/net_ib.cc#L2111">NCCL 内置 IB 后端</a></li>
-        </ul>
-      </details>
-    </section>
-
-
-    
-<section id="validation" aria-labelledby="validation-title" class="ivn-section">
-      <header class="chapter-header">
-        <h2 id="validation-title">从机器配置到实际验证</h2>
-        <p class="ivn-intro">从 GPU 互访能力查到实际训练选用的网卡和传输。能测通主机内存上的 RDMA 后，再单独确认网卡能否直接访问显存。</p>
-      </header>
-      <div role="region" aria-label="配置和验证方法表" class="ivn-scroll" tabindex="0">
-      <table class="data-table checks ivn-module ivn-wide ivn-wide--dense ivn-ledger">
-        <colgroup><col><col><col></colgroup>
-        <thead><tr><th scope="col">检查项</th><th scope="col">命令或工具</th><th scope="col">核对内容</th></tr></thead>
-        <tbody>
-          <tr><th scope="row">看硬件拓扑</th><td><code>nvidia-smi topo -m</code>、<code>lspci -tv</code></td><td>确认 GPU ↔ GPU、GPU ↔ NIC 的路径和 NUMA。</td></tr>
-          <tr><th scope="row">测同机 P2P</th><td><code>nvidia-smi topo -p2p p</code>、<code>nvbandwidth</code></td><td>核对 P2P 能力，再实测 GPU 互访带宽。</td></tr>
-          <tr><th scope="row">测跨机 RDMA</th><td><code>rdma link</code>、<code>ibv_devinfo</code>、<code>ib_write_bw</code></td><td>先测主机缓冲区，再用支持 CUDA 的 perftest 测 GPU 缓冲区。</td></tr>
-          <tr><th scope="row">复现训练通信</th><td><code>NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT,NET,GRAPH</code></td><td>核对网卡和传输，再用相同 GPU 分组的 NCCL Tests 实测。</td></tr>
-        </tbody>
-      </table>
-      </div>
-      <div class="ivn-callout" data-tone="blue"><p><strong class="ivn-label">配置归属</strong>　整机布线决定硬件拓扑。宿主机驱动和平台所需的 Fabric Manager / NVLSM 初始化互联。网卡驱动、IB / RoCE 网络以及 DMA-BUF 或 <code>nvidia-peermem</code> 支撑 GDR。</p></div>
-      <details class="sources">
-        <summary>查看 NVIDIA 参考文档</summary>
-        <ul>
-          <li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/deploy/nvidia-smi/index.html">nvidia-smi 拓扑命令</a></li>
-          <li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/cuda/gpudirect-rdma/index.html">GPUDirect RDMA</a></li>
-          <li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/troubleshooting.html">NCCL 排查指南</a></li>
-          <li><a target="_blank" rel="noopener" href="https://docs.nvidia.com/datacenter/tesla/fabric-manager-user-guide/">Fabric Manager</a></li>
-          <li><a target="_blank" rel="noopener" href="https://github.com/NVIDIA/nccl-tests">NCCL Tests</a></li>
-        </ul>
-      </details>
-    </section>
-
-  
-<footer class="ivn-takeaway" data-tone="green" aria-label="要点"><span class="ivn-label ivn-chip">TAKEAWAY</span><p>看清 GPU、网卡和 CPU 的拓扑，再按每条连接追踪 NCCL 的传输选择。最后用链路、内存注册和实际通信日志交叉验证 RDMA 确实生效。</p></footer>
+  <footer class="ivn-takeaway">
+    <span class="ivn-takeaway-mark">TAKEAWAY</span>
+    <p>先确定 GPU、网卡及 CPU 的拓扑，再按连接追踪 NCCL 的选路。最后核对链路、内存注册与训练通信日志，才能判断 RDMA 及 GPUDirect 是否真正生效。</p>
+  </footer>
 </main>
 </body>
 </html>

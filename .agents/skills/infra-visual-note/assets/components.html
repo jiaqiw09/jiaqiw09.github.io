@@ -3,306 +3,114 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="用同一组整数验证矩阵结合律，并追踪投影按特征切分后的跨卡归约。">
-  <title>矩阵结合律与跨卡归约</title>
-  <!-- 发布到 notes/<slug>/index.html 后，改用 ../../assets/infra-visual-note.css。 -->
+  <meta name="description" content="用同一组整数验证结合律，并核对分片后跨卡归约的结果。">
+  <title>把矩阵乘法拆到两个 Rank</title>
   <link rel="stylesheet" href="../../../../assets/infra-visual-note.css">
 </head>
 <body class="ivn">
 <main class="ivn-canvas">
-  <!-- 1. Header + Jump Bar + Spec Bar -->
-  <header class="ivn-heading">
-    <p class="ivn-kicker">LINEAR ALGEBRA / TENSOR PARALLELISM</p>
-    <h1>矩阵结合律与跨卡归约</h1>
-    <p class="ivn-deck">用同一组整数验证两种投影次序，再把缩并轴切到两个 Rank 上。</p>
+  <header class="ivn-header" id="top">
+    <p class="ivn-kicker">MODEL ARCHITECTURE / TENSOR PARALLELISM</p>
+    <h1>把矩阵乘法拆到两个 Rank</h1>
+    <p class="ivn-subtitle">用同一组整数验证结合律，并核对分片后跨卡归约的结果。</p>
     <nav class="ivn-jump" aria-label="文章目录">
-      <a href="#intuition"><span class="ivn-jump-index">01</span>核心直觉</a>
-      <a href="#workbench"><span class="ivn-jump-index">02</span>手算对照</a>
-      <a href="#ranks"><span class="ivn-jump-index">03</span>Rank 数据流</a>
-      <a href="#cost"><span class="ivn-jump-index">04</span>数字账本</a>
+      <a href="#intuition"><span class="ivn-num">01</span>核心直觉</a>
+      <a href="#math"><span class="ivn-num">02</span>维度手算</a>
+      <a href="#flow"><span class="ivn-num">03</span>Rank 数据流</a>
+      <a href="#ledger"><span class="ivn-num">04</span>工程账本</a>
     </nav>
     <dl class="ivn-spec" aria-label="全局设定">
-      <div><dt>向量记法</dt><dd>行向量</dd></div>
-      <div><dt>手算规模</dt><dd><code>m=1, k=2, h=2, n=1</code></dd></div>
-      <div><dt>并行拓扑</dt><dd><code>TP=2, DP=1</code></dd></div>
-      <div><dt>工程估算</dt><dd><code>m=128, k=h=4096, n=64, bf16</code></dd></div>
+      <div><dt>记法</dt><dd>统一行向量</dd></div>
+      <div><dt>玩具规模</dt><dd><code>m=1, k=2, h=2, n=1</code></dd></div>
+      <div><dt>拓扑</dt><dd><code>TP=2 · DP=1</code></dd></div>
+      <div><dt>精度</dt><dd>bf16=2 B</dd></div>
     </dl>
   </header>
 
-  <section class="ivn-section" aria-labelledby="intuition">
-    <h2 id="intuition">两次投影为何可以调整计算顺序</h2>
-    <div class="ivn-intro">
-      <p>输入 <var>X</var> 有 <var>m</var> 行样本、每行 <var>k</var> 个特征。矩阵 <var>A</var> 把特征宽度从 <var>k</var> 投到 <var>h</var>，矩阵 <var>B</var> 再投到 <var>n</var>，输出记作 <var>Y</var>。</p>
-      <p>连续两步都是线性投影时，结合律允许先合并权重。调整前后，各次乘法的缩并维度和需要保留的中间张量会发生变化。</p>
-    </div>
-
-    <!-- 2. Concept Strip. Copy 3 or 4 cards in reading order. -->
-    <div class="ivn-scroll" role="region" aria-label="投影顺序的四个概念" tabindex="0">
-      <div class="ivn-module ivn-wide ivn-concepts">
-        <div class="ivn-card" data-tone="blue">
-          <span class="ivn-label">01 起点</span>
-          <h3>连续线性投影</h3>
-          <code>X[m,k] · A[k,h] · B[h,n]</code>
-          <p>中间表示有 <var>h</var> 个特征。</p>
-        </div>
-        <div class="ivn-card" data-tone="amber">
-          <span class="ivn-label">02 瓶颈</span>
-          <h3>先投影每行输入</h3>
-          <code>(X · A)[m,h]</code>
-          <p>先生成宽度为 <var>h</var> 的中间张量，其体积随样本行数和宽度增长。</p>
-        </div>
-        <div class="ivn-card" data-tone="blue">
-          <span class="ivn-label">03 性质</span>
-          <h3>矩阵乘法结合律</h3>
-          <code>(X · A) · B = X · (A · B)</code>
-          <p>实数域下输出相同，两次乘法的分组可以调整。</p>
-        </div>
-        <div class="ivn-card" data-tone="green">
-          <span class="ivn-label">04 优化</span>
-          <h3>复用合并权重</h3>
-          <code>W[k,n] = A[k,h] · B[h,n]</code>
-          <p>固定权重的推理可以缓存 <var>W</var>，把合并移出重复执行路径。</p>
-        </div>
+  <section class="ivn-section" id="intuition">
+    <header class="ivn-sec-head"><span class="ivn-sec-index">01</span><h2>在哪一侧先合并</h2></header>
+    <p class="ivn-lead">连续两次线性投影可改变加括号的位置。记录中间形状有助于比较两个执行顺序。</p>
+    <div class="ivn-scroll" data-width="860" role="region" aria-label="标准四栏直觉卡" tabindex="0">
+      <div class="ivn-grid-4">
+        <article class="ivn-card" data-tone="blue"><span class="ivn-badge" data-tone="blue">01 起点</span><h3>输入矩阵与形状</h3><code>x [1×2] · W [2×2] · B [2×1]</code><p>行向量 x 的两维参与内积。</p></article>
+        <article class="ivn-card" data-tone="amber"><span class="ivn-badge" data-tone="amber">02 瓶颈</span><h3>先展开会产生中间状态</h3><code>(x·W) [1×2]</code><p>展开时须暂存两列。宽度增大时应单独核算。</p></article>
+        <article class="ivn-card" data-tone="blue"><span class="ivn-badge" data-tone="blue">03 性质</span><h3>结合律允许先合并权重</h3><p>连续的线性运算可重新分组。</p></article>
+        <article class="ivn-card" data-tone="green"><span class="ivn-badge" data-tone="green">04 优化</span><h3>留存合并权重</h3><p>固定权重时可提前算 W·B，重复使用。</p></article>
       </div>
     </div>
   </section>
 
-  <section class="ivn-section" aria-labelledby="workbench">
-    <h2 id="workbench">用同一组数字验算两条路径</h2>
-    <div class="ivn-intro">
-      <p>取 <var>X</var> = [2, 3]，<var>A</var> 的两行为 [1, 2]、[0, 1]，<var>B</var> 的一列为 [2, 1]。先展开输入，或先把两张权重相乘，都会得到一个 1 × 1 的输出。</p>
-      <p>两边分步写出缩并维度和每个元素的乘加，便于逐项核对输入、中间值和输出。</p>
+  <section class="ivn-section" id="math">
+    <header class="ivn-sec-head"><span class="ivn-sec-index">02</span><h2>用同一组小整数验算</h2></header>
+    <p class="ivn-lead">每个矩阵乘法先看内侧维度能否相乘。再逐项核算两条路径的结果。</p>
+    <div class="ivn-scroll" data-width="860" role="region" aria-label="标准手算工作台" tabindex="0">
+      <div class="ivn-workbench">
+        <article class="ivn-wb-panel"><div class="ivn-wb-head"><h3>先展开输入</h3><span class="ivn-badge" data-tone="red">朴素路径</span></div><div class="ivn-dim-formula"><span class="ivn-term" data-tone="blue"><span class="ivn-expr"><i>x</i></span><span class="ivn-dim">1 × 2</span></span><span class="ivn-op">·</span><span class="ivn-term" data-tone="blue"><span class="ivn-expr"><i>W</i></span><span class="ivn-dim">2 × 2</span></span><span class="ivn-op">=</span><span class="ivn-term" data-tone="blue"><span class="ivn-expr"><i>xW</i></span><span class="ivn-dim">1 × 2</span></span></div><div class="ivn-calc-row"><span class="ivn-mat" data-cols="2" role="img" aria-label="矩阵 2, 3"><span>2</span><span>3</span></span> · <span class="ivn-mat" data-cols="2" role="img" aria-label="矩阵 1, 2；0, 1"><span>1</span><span>2</span><span>0</span><span>1</span></span> = <span class="ivn-mat" data-cols="2" role="img" aria-label="矩阵 2, 7"><span>2</span><span>7</span></span></div><div class="ivn-dim-formula"><span class="ivn-term" data-tone="blue"><span class="ivn-expr"><i>xW</i></span><span class="ivn-dim">1 × 2</span></span><span class="ivn-op">·</span><span class="ivn-term" data-tone="amber"><span class="ivn-expr"><i>B</i></span><span class="ivn-dim">2 × 1</span></span><span class="ivn-op">=</span><span class="ivn-term" data-tone="green"><span class="ivn-expr"><i>y</i></span><span class="ivn-dim">1 × 1</span></span></div><div class="ivn-calc-row"><span class="ivn-mat" data-cols="2" role="img" aria-label="矩阵 2, 7"><span>2</span><span>7</span></span> · <span class="ivn-mat" data-cols="1" role="img" aria-label="矩阵 2；1"><span>2</span><span>1</span></span> = 11</div><p class="ivn-res">y = 11</p></article>
+        <article class="ivn-wb-panel"><div class="ivn-wb-head"><h3>先合并权重</h3><span class="ivn-badge" data-tone="green">等价路径</span></div><div class="ivn-dim-formula"><span class="ivn-term" data-tone="blue"><span class="ivn-expr"><i>W</i></span><span class="ivn-dim">2 × 2</span></span><span class="ivn-op">·</span><span class="ivn-term" data-tone="blue"><span class="ivn-expr"><i>B</i></span><span class="ivn-dim">2 × 1</span></span><span class="ivn-op">=</span><span class="ivn-term" data-tone="green"><span class="ivn-expr"><i>u</i></span><span class="ivn-dim">2 × 1</span></span></div><div class="ivn-calc-row"><span class="ivn-mat" data-cols="2" role="img" aria-label="矩阵 1, 2；0, 1"><span>1</span><span>2</span><span>0</span><span>1</span></span> · <span class="ivn-mat" data-cols="1" role="img" aria-label="矩阵 2；1"><span>2</span><span>1</span></span> = <span class="ivn-mat" data-cols="1" role="img" aria-label="矩阵 4；1"><span>4</span><span>1</span></span></div><div class="ivn-dim-formula"><span class="ivn-term" data-tone="blue"><span class="ivn-expr"><i>x</i></span><span class="ivn-dim">1 × 2</span></span><span class="ivn-op">·</span><span class="ivn-term" data-tone="blue"><span class="ivn-expr"><i>u</i></span><span class="ivn-dim">2 × 1</span></span><span class="ivn-op">=</span><span class="ivn-term" data-tone="green"><span class="ivn-expr"><i>y</i></span><span class="ivn-dim">1 × 1</span></span></div><div class="ivn-calc-row"><span class="ivn-mat" data-cols="2" role="img" aria-label="矩阵 2, 3"><span>2</span><span>3</span></span> · <span class="ivn-mat" data-cols="1" role="img" aria-label="矩阵 4；1"><span>4</span><span>1</span></span> = 11</div><p class="ivn-res">y = 11</p></article>
+      </div>
     </div>
+  </section>
 
-    <!-- 3. Math Workbench + Dimension-Annotated Formula + Pure-CSS Bracket Matrix -->
-    <div class="ivn-scroll" role="region" aria-label="矩阵乘法手算工作台" tabindex="0">
-      <figure class="ivn-module ivn-wide ivn-wide--medium">
-        <figcaption>两条计算路径的输入、形状与结果</figcaption>
-        <div class="ivn-workbench">
-          <section class="ivn-card" data-tone="red">
-            <h3><span class="ivn-label">朴素展开</span> 先算输入投影</h3>
-            <div class="ivn-formula">
-              <span class="ivn-term" data-tone="blue"><var>X</var><span class="ivn-dim">1 × 2</span></span>
-              <span>·</span>
-              <span class="ivn-term" data-tone="blue"><var>A</var><span class="ivn-dim">2 × 2</span></span>
-              <span>=</span>
-              <span class="ivn-term"><var>XA</var><span class="ivn-dim">1 × 2</span></span>
-            </div>
-            <p class="ivn-formula">
-              <span class="ivn-matrix ivn-matrix--two" role="img" aria-label="X，第一行 2，3"><span aria-hidden="true">2</span><span aria-hidden="true">3</span></span>
-              <span>·</span>
-              <span class="ivn-matrix ivn-matrix--two" role="img" aria-label="A，第一行 1，2，第二行 0，1"><span aria-hidden="true">1</span><span aria-hidden="true">2</span><span aria-hidden="true">0</span><span aria-hidden="true">1</span></span>
-              <span>=</span>
-              <span class="ivn-matrix ivn-matrix--two" role="img" aria-label="XA，第一行 2，7"><span aria-hidden="true">2</span><span aria-hidden="true">7</span></span>
-            </p>
-            <p><code>[2·1 + 3·0, 2·2 + 3·1] = [2, 7]</code></p>
-            <div class="ivn-formula">
-              <span class="ivn-term"><var>XA</var><span class="ivn-dim">1 × 2</span></span>
-              <span>·</span>
-              <span class="ivn-term" data-tone="blue"><var>B</var><span class="ivn-dim">2 × 1</span></span>
-              <span>=</span>
-              <span class="ivn-term" data-tone="green"><var>Y</var><span class="ivn-dim">1 × 1</span></span>
-            </div>
-            <p><code>2·2 + 7·1 = 11</code>。先保存宽度为 2 的中间表示。</p>
-            <p class="ivn-result" data-tone="green"><span class="ivn-label">结果</span> <code>Y = [11]</code></p>
-          </section>
-          <section class="ivn-card" data-tone="green">
-            <h3><span class="ivn-label">等价优化</span> 先合并权重</h3>
-            <div class="ivn-formula">
-              <span class="ivn-term" data-tone="blue"><var>A</var><span class="ivn-dim">2 × 2</span></span>
-              <span>·</span>
-              <span class="ivn-term" data-tone="blue"><var>B</var><span class="ivn-dim">2 × 1</span></span>
-              <span>=</span>
-              <span class="ivn-term"><var>W</var><span class="ivn-dim">2 × 1</span></span>
-            </div>
-            <p class="ivn-formula">
-              <span class="ivn-matrix ivn-matrix--two" role="img" aria-label="A，第一行 1，2，第二行 0，1"><span aria-hidden="true">1</span><span aria-hidden="true">2</span><span aria-hidden="true">0</span><span aria-hidden="true">1</span></span>
-              <span>·</span>
-              <span class="ivn-matrix" role="img" aria-label="B，列向量 2，1"><span aria-hidden="true">2</span><span aria-hidden="true">1</span></span>
-              <span>=</span>
-              <span class="ivn-matrix" role="img" aria-label="W，列向量 4，1"><span aria-hidden="true">4</span><span aria-hidden="true">1</span></span>
-            </p>
-            <p><code>W₀ = 1·2 + 2·1 = 4, W₁ = 0·2 + 1·1 = 1</code></p>
-            <div class="ivn-formula">
-              <span class="ivn-term" data-tone="blue"><var>X</var><span class="ivn-dim">1 × 2</span></span>
-              <span>·</span>
-              <span class="ivn-term"><var>W</var><span class="ivn-dim">2 × 1</span></span>
-              <span>=</span>
-              <span class="ivn-term"><var>Y</var><span class="ivn-dim">1 × 1</span></span>
-            </div>
-            <p><code>2·4 + 3·1 = 11</code>。同一份 <var>W</var> 可以读入多组 <var>X</var>。</p>
-            <p class="ivn-result"><span class="ivn-label">结果</span> <code>Y = [11]</code></p>
-          </section>
+  <section class="ivn-section" id="flow">
+    <header class="ivn-sec-head"><span class="ivn-sec-index">03</span><h2>按缩并轴切分后做 SUM</h2></header>
+    <p class="ivn-lead">切分缩并轴后，每卡只拿到一个部分和。跨两个 Rank 求和才能还原完整输出。</p>
+    <div class="ivn-scroll" data-width="860" role="region" aria-label="标准三栏泳道" tabindex="0">
+      <div class="ivn-swimlane-board">
+        <div class="ivn-lane-headers"><span>Rank 0 · k=0</span><span>算子与通信契约</span><span>Rank 1 · k=1</span></div>
+        <div class="ivn-stage">
+          <h3 class="ivn-stage-bar"><span class="ivn-stage-num">STAGE 1</span>局部乘法</h3>
+          <div class="ivn-stage-cols">
+            <div class="ivn-lane-cell"><div class="ivn-slots" role="group" aria-label="左输入"><span class="ivn-slot">x₀=2</span><span class="ivn-slot">u₀=4</span></div><pre class="ivn-code"><code>z0 = x0 * u0  # shape [1,1] → [1,1]</code></pre><p>得部分和 8。</p></div>
+            <div class="ivn-lane-mid"><code>local_matmul</code><p>两个 Rank 持有缩并轴的不同位置，各自计算局部乘积。</p></div>
+            <div class="ivn-lane-cell"><div class="ivn-slots" role="group" aria-label="右输入"><span class="ivn-slot">x₁=3</span><span class="ivn-slot">u₁=1</span></div><pre class="ivn-code"><code>z1 = x1 * u1  # shape [1,1] → [1,1]</code></pre><p>得部分和 3。</p></div>
+          </div>
         </div>
-      </figure>
+        <div class="ivn-stage" data-phase="comm">
+          <h3 class="ivn-stage-bar"><span class="ivn-stage-num">STAGE 2</span>跨卡归约</h3>
+          <div class="ivn-stage-cols">
+            <div class="ivn-lane-cell"><div class="ivn-slots" role="group" aria-label="左部分和"><span class="ivn-slot">z₀=8</span></div></div>
+            <div class="ivn-lane-mid"><span class="ivn-comm-pill">↔ All-Reduce (SUM)</span><p>每卡贡献一个逻辑标量。复制式 SUM，无 scatter / gather 轴。</p></div>
+            <div class="ivn-lane-cell"><div class="ivn-slots" role="group" aria-label="右部分和"><span class="ivn-slot">z₁=3</span></div></div>
+          </div>
+        </div>
+        <div class="ivn-stage" data-phase="out">
+          <h3 class="ivn-stage-bar"><span class="ivn-stage-num">STAGE 3</span>复制输出</h3>
+          <div class="ivn-stage-cols">
+            <div class="ivn-lane-cell"><div class="ivn-slots" role="group" aria-label="左输出"><span class="ivn-slot" data-tone="green">y=11</span></div></div>
+            <div class="ivn-lane-mid"><span class="ivn-badge" data-tone="green">结果</span><p>两个 Rank 均可读取 y。</p></div>
+            <div class="ivn-lane-cell"><div class="ivn-slots" role="group" aria-label="右输出"><span class="ivn-slot" data-tone="green">y=11</span></div></div>
+          </div>
+        </div>
+      </div>
     </div>
-
-    <!-- 8a. Callout Bar. Put the semantic label in visible text. -->
-    <p class="ivn-callout" data-tone="amber"><strong class="ivn-label">工程边界 ·</strong>结合律适用于这个纯线性关系。加入非线性或更换浮点求值次序后，需要分别核对数学条件与数值误差。</p>
+    <div class="ivn-scroll" data-width="860" role="region" aria-label="标准横向编号流水线" tabindex="0">
+      <ol class="ivn-pipeline" data-steps="3">
+        <li class="ivn-card" data-tone="blue"><span class="ivn-badge" data-tone="blue">01</span><h3>拆分缩并轴</h3><code>split(x, u, axis=k)</code><p>保持输入与权重的同一缩并位置配对。</p></li>
+        <li class="ivn-card" data-tone="amber"><span class="ivn-badge" data-tone="amber">02</span><h3>对齐并存入槽位</h3><code>align(x_r, u_r)</code><div class="ivn-slots" role="group" aria-label="有效与填充槽"><span class="ivn-slot">有效槽</span><span class="ivn-slot is-masked">padding</span></div><p>填充槽在聚合前置零。</p></li>
+        <li class="ivn-card" data-tone="purple"><span class="ivn-badge" data-tone="purple">03</span><h3>归约部分和</h3><code>all_reduce(z, SUM)</code><p>每个 Rank 都得到完整输出。</p></li>
+      </ol>
+    </div>
+    <p class="ivn-callout" data-tone="amber"><strong class="ivn-callout-tag">工程边界 ·</strong>若两个 Rank 上的复制结果同时参与 loss，反向归约必须说明两项 loss 如何计量。</p>
   </section>
 
-  <section class="ivn-section" aria-labelledby="ranks">
-    <h2 id="ranks">按缩并轴切分后，跨卡归约哪一部分</h2>
-    <div class="ivn-intro">
-      <p>把 <var>X</var> 的特征轴和 <var>W</var> 的行轴分别按 <var>k</var> 切给两个 Rank。局部下标 <var>r</var> 表示 Rank 编号，<var>z</var><sub>r</sub> 表示它在本地算出的部分和。</p>
-      <p>每张卡独立计算一个贡献，对两个贡献做 SUM 后，每张卡都得到完整的 <var>Y</var>。</p>
-    </div>
-
-    <!-- 4. Multi-Lane Stage Swimlane. Keep both Rank lanes blue. -->
-    <div class="ivn-scroll" role="region" aria-label="跨卡投影的阶段泳道" tabindex="0">
-      <div class="ivn-module ivn-wide ivn-wide--dense">
-        <table class="ivn-swimlane" aria-label="两个 Rank 的前向数据流">
-          <thead>
-            <tr>
-              <th scope="col"><span class="ivn-label">RANK 0</span> 特征 0</th>
-              <th scope="col">阶段与通信契约</th>
-              <th scope="col"><span class="ivn-label">RANK 1</span> 特征 1</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>
-                <div class="ivn-lane" data-tone="blue">
-                  <p><strong>输入分片</strong></p>
-                  <!-- 5. Tensor / Token Slot Strip. List logical memory order. -->
-                  <ol class="ivn-slots" aria-label="Rank 0 本地输入与权重槽位">
-                    <li class="ivn-slot">X₀=2</li>
-                    <li class="ivn-slot">W₀=4</li>
-                  </ol>
-                  <pre><code>z0 = X0 @ W0  # (1 × 1), (1 × 1) -&gt; (1 × 1)</code></pre>
-                  <p>本地缩并得到部分和 <code>8</code>。</p>
-                </div>
-              </td>
-              <th scope="row">
-                <div class="ivn-contract" data-tone="blue">
-                  <span class="ivn-label">STAGE 1</span>
-                  <p><strong>本地矩阵乘法</strong></p>
-                  <p>两个输入分片按同一个特征下标配对，本地就能计算。</p>
-                </div>
-              </th>
-              <td>
-                <div class="ivn-lane" data-tone="blue">
-                  <p><strong>输入分片</strong></p>
-                  <ol class="ivn-slots" aria-label="Rank 1 本地输入与权重槽位">
-                    <li class="ivn-slot">X₁=3</li>
-                    <li class="ivn-slot">W₁=1</li>
-                  </ol>
-                  <pre><code>z1 = X1 @ W1  # (1 × 1), (1 × 1) -&gt; (1 × 1)</code></pre>
-                  <p>本地缩并得到部分和 <code>3</code>。</p>
-                </div>
-              </td>
-            </tr>
-            <tr data-phase="communication">
-              <td>
-                <div class="ivn-lane" data-tone="blue">
-                  <p><strong>部分和与归约结果</strong></p>
-                  <ol class="ivn-slots" aria-label="Rank 0 部分和 8 与复制结果 11">
-                    <li class="ivn-slot">z₀=8</li>
-                    <li class="ivn-slot" data-tone="green">Y=11</li>
-                  </ol>
-                  <pre><code>Y0 = sum_tp(z0)  # (1 × 1) -&gt; (1 × 1)</code></pre>
-                  <p>完整输出在 Rank 0 可用。</p>
-                </div>
-              </td>
-              <th scope="row">
-                <div class="ivn-contract">
-                  <span class="ivn-label">STAGE 2</span>
-                  <p><span class="ivn-collective">↔ All-Reduce (SUM)</span></p>
-                  <p>TP 组 <code>{0, 1}</code> 各输入和输出 1 个逻辑元素，逐元素求和，张量形状不变。没有 scatter 或 gather 轴。</p>
-                </div>
-              </th>
-              <td>
-                <div class="ivn-lane" data-tone="blue">
-                  <p><strong>部分和与归约结果</strong></p>
-                  <ol class="ivn-slots" aria-label="Rank 1 部分和 3 与复制结果 11">
-                    <li class="ivn-slot">z₁=3</li>
-                    <li class="ivn-slot" data-tone="green">Y=11</li>
-                  </ol>
-                  <pre><code>Y1 = sum_tp(z1)  # (1 × 1) -&gt; (1 × 1)</code></pre>
-                  <p>完整输出在 Rank 1 可用。</p>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- 6. Numbered Step Pipeline. Add ivn-pipeline--vertical for top-down order. -->
-    <div class="ivn-scroll" role="region" aria-label="复制输出的反向计算" tabindex="0">
-      <div class="ivn-module ivn-wide">
-        <h3>反向传播如何回到输入分片</h3>
-        <ol class="ivn-pipeline">
-          <li class="ivn-card" data-tone="blue">
-            <h3><span class="ivn-label">01</span> 设置上游梯度</h3>
-            <code>dY₀[1,1]=[1], dY₁[1,1]=[0]</code>
-            <p>只在 Rank 0 取这一次逻辑 loss 的梯度，避免对复制输出重复计数。</p>
-          </li>
-          <li class="ivn-card" data-tone="purple">
-            <h3><span class="ivn-label">02</span> 转置归约</h3>
-            <code>All-Reduce(SUM): ([1], [0]) → ([1], [1])</code>
-            <p>SUM 复制映射的转置仍是组内逐元素 SUM。每个 Rank 的局部输出梯度为 <code>[1]</code>。</p>
-          </li>
-          <li class="ivn-card" data-tone="green">
-            <h3><span class="ivn-label">03</span> 求本地输入梯度</h3>
-            <code>dXᵣ[1,1] = dzᵣ[1,1] · Wᵣᵀ[1,1]</code>
-            <p>Rank 0 得到 <code>[4]</code>，Rank 1 得到 <code>[1]</code>。每卡持有自身特征的梯度，DP=1 无数据并行归约。</p>
-          </li>
-        </ol>
-      </div>
-    </div>
-    <p class="ivn-callout" data-tone="amber"><strong class="ivn-label">工程边界 ·</strong>此例切的是特征轴，输入为满长单行，不涉及 padding 掩码或跨序列分片的 Shift 标签。1 个逻辑元素是每 Rank 的接口负载，实际链路字节取决于集合算法和传输协议。</p>
-  </section>
-
-  <section class="ivn-section" aria-labelledby="cost">
-    <h2 id="cost">把中间张量和计算量换成明确数字</h2>
-    <div class="ivn-intro">
-      <p>工程估算采用开头的形状和 bf16 存储，1 个元素为 2 B。按完整矩阵计算，<code>[m,k] · [k,n]</code> 计为 <code>m·k·n</code> 个 MAC。</p>
-      <p>缓存 <var>W</var> 的方案适用于固定权重、重复调用的稳态。下表采用未分片的逻辑总量，列出中间张量和额外缓存，输出、原始权重和内核工作区不计入这两列。</p>
-    </div>
-
-    <!-- 7. Quantitative Ledger Table -->
-    <div class="ivn-scroll" role="region" aria-label="工程规模乘加和存储账本" tabindex="0">
-      <div class="ivn-module ivn-wide ivn-wide--dense">
-        <table class="ivn-ledger">
-          <caption>工程估算 · 每次前向 MAC 与 bf16 存储体积</caption>
-          <thead>
-            <tr>
-              <th scope="col">路径</th>
-              <th scope="col">乘法维度</th>
-              <th scope="col" class="ivn-number">每次前向 MAC</th>
-              <th scope="col" class="ivn-number">临时中间张量</th>
-              <th scope="col" class="ivn-number">额外常驻</th>
-              <th scope="col" class="ivn-number">一次性预计算 MAC</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <th scope="row">朴素展开</th>
-              <td><code>128·4096·4096 + 128·4096·64</code></td>
-              <td class="ivn-number">2,181,038,080</td>
-              <td class="ivn-number"><code>128·4096·2 = 1,048,576 B</code><p>1 MiB</p></td>
-              <td class="ivn-number">0 B</td>
-              <td class="ivn-number">0</td>
-            </tr>
-            <tr data-tone="green">
-              <th scope="row"><span class="ivn-label">稳态优选</span><p>复用合并权重</p></th>
-              <td><code>128·4096·64</code></td>
-              <td class="ivn-number">33,554,432</td>
-              <td class="ivn-number">0 B</td>
-              <td class="ivn-number"><code>4096·64·2 = 524,288 B</code><p>0.5 MiB</p></td>
-              <td class="ivn-number"><code>4096·4096·64</code><p>1,073,741,824</p></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+  <section class="ivn-section" id="ledger">
+    <header class="ivn-sec-head"><span class="ivn-sec-index">04</span><h2>稳态投影与一次性预计算</h2></header>
+    <p class="ivn-lead">账本固定输入与权重规模。固定权重的推理可在多次调用之间复用预计算。</p>
+    <div class="ivn-scroll" data-width="860" role="region" aria-label="固定权重玩具基准，bf16 = 2 B；只计临时中间向量" tabindex="0">
+      <table class="ivn-ledger">
+        <caption>固定权重玩具基准，bf16 = 2 B；只计临时中间向量</caption>
+        <thead><tr><th scope="col">路径</th><th class="ivn-num-col" scope="col">每次推理</th><th class="ivn-num-col" scope="col">一次性预计算</th><th class="ivn-num-col" scope="col">临时张量</th></tr></thead>
+        <tbody>
+          <tr><td>先展开输入</td><td class="ivn-num-col">1·2·2 + 1·2·1 = 6 MAC</td><td class="ivn-num-col">0 MAC</td><td class="ivn-num-col">2 元素 = 4 B</td></tr>
+          <tr data-tone="green"><td>复用合并权重</td><td class="ivn-num-col">1·2·1 = 2 MAC</td><td class="ivn-num-col">2·2·1 = 4 MAC</td><td class="ivn-num-col">0 B；W·B 另驻留 4 B</td></tr>
+        </tbody>
+      </table>
     </div>
   </section>
 
-  <!-- 8b. Takeaway Card -->
-  <footer class="ivn-takeaway" data-tone="green" aria-label="要点">
-    <span class="ivn-label ivn-chip">TAKEAWAY</span>
-    <p>矩阵结合律允许把固定权重的合并移出重复计算。把缩并轴切给两个 Rank 后，本地结果仍是部分和，需要在 TP 组归约成完整输出。核对形状、作用域和字节口径，就能同时检查等价推导与实现代价。</p>
+  <footer class="ivn-takeaway">
+    <span class="ivn-takeaway-mark">TAKEAWAY</span>
+    <p>维度决定哪一侧可先算，缩并轴的分片决定何时必须求和。比较优化时，分别记录预计算、重复计算和临时存储。</p>
   </footer>
 </main>
 </body>

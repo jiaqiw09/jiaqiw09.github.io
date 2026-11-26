@@ -3,229 +3,171 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Ulysses 序列并行的张量切分、两次 All-to-All 和训练边界。">
-  <title>ULySSes Sequence Parallelism (SP) 流程图</title>
+  <meta name="description" content="沿两次 All-to-All 追踪序列分片、注意力头和训练边界。">
+  <title>Ulysses 序列并行（SP）</title>
   <link rel="stylesheet" href="../../assets/infra-visual-note.css">
 </head>
-<body class="ivn ivn-ulysses">
+<body class="ivn">
 <main class="ivn-canvas">
-<header class="ivn-heading"><p class="ivn-kicker">DISTRIBUTED TRAINING / ULYSSES SP</p><h1>ULySSes Sequence Parallelism (SP) 流程图</h1><p class="ivn-deck">两次 All-to-All 如何在序列分片和注意力头分片之间切换。</p><nav class="ivn-jump" aria-label="文章目录"><a href="#principle"><span class="ivn-jump-index">01</span>核心原理</a><a href="#setup"><span class="ivn-jump-index">02</span>示例设定</a><a href="#flow"><span class="ivn-jump-index">03</span>主数据流</a><a href="#flash"><span class="ivn-jump-index">04</span>Flash Attention</a><a href="#details"><span class="ivn-jump-index">05</span>训练边界</a></nav><dl class="ivn-spec" aria-label="全局设定"><div><dt>模型</dt><dd>Qwen3–0.6B</dd></div><div><dt>设备</dt><dd>4 × GPU</dd></div><div><dt>并行</dt><dd><code>FSDP2 · DP=2 · CP=2</code></dd></div><div><dt>每组输入</dt><dd><code>batch_size=2 · seq_len=8</code></dd></div></dl></header>
-<section aria-labelledby="principle" class="ivn-section">
-    <h2 id="principle">核心原理</h2><div class="ivn-intro"><p>序列切分适合逐 token 的操作，注意力却依赖完整上下文。Ulysses 在注意力前后交换序列和头维，让每张卡只负责部分头，同时读到每个头的完整序列。</p></div>
-    <div role="region" aria-label="Ulysses 四项核心原理" class="ivn-scroll" tabindex="0">
-    <div class="grid four ivn-module ivn-wide ivn-wide--dense ivn-concepts">
-      <div class="lead-card ivn-card" data-tone="blue"><span class="ivn-label">01</span><div><h3>非 Attention 层：</h3><p>Embedding / RMSNorm / MLP 按序列切分仍然正确 <span class="muted">（per-token 独立）</span></p></div></div>
-      <div class="lead-card ivn-card" data-tone="amber"><span class="ivn-label">02</span><div><h3>Attention 层：</h3><p><strong>需要完整序列</strong> 直接按序列切分会导致错误 因为 QK^T 需要每个 query 看见所有 key</p></div></div>
-      <div class="lead-card ivn-card" data-tone="green"><span class="ivn-label">03</span><div><h3>关键性质：</h3><p>不同 attention head 彼此独立 因此可以按 head 分工计算</p></div></div>
-      <div class="lead-card ivn-card" data-tone="blue"><span class="ivn-label">04</span><div><h3>解决思路：</h3><p>通过两次 All-to-All 在 「部分序列 + 全部头」↔ 「完整序列 + 部分头」之间切换</p></div></div>
+  <header class="ivn-header" id="top">
+    <p class="ivn-kicker">DISTRIBUTED TRAINING / ULYSSES SP</p>
+    <h1>Ulysses 序列并行（SP）</h1>
+    <p class="ivn-subtitle">沿两次 All-to-All 追踪序列分片、注意力头和训练边界。</p>
+    <nav class="ivn-jump" aria-label="文章目录">
+      <a href="#principle"><span class="ivn-num">01</span>核心原理</a>
+      <a href="#setup"><span class="ivn-num">02</span>设备网格</a>
+      <a href="#flow"><span class="ivn-num">03</span>前向数据流</a>
+      <a href="#flash"><span class="ivn-num">04</span>FlashAttention</a>
+      <a href="#details"><span class="ivn-num">05</span>训练工程边界</a>
+      <a href="#summary"><span class="ivn-num">06</span>数字账本</a>
+    </nav>
+    <dl class="ivn-spec" aria-label="全局设定">
+      <div><dt>模型</dt><dd>Qwen3-0.6B</dd></div>
+      <div><dt>设备</dt><dd>4×GPU</dd></div>
+      <div><dt>拓扑</dt><dd>FSDP2 · DP=2 · CP=2</dd></div>
+      <div><dt>形状</dt><dd><code>B=2, S=8, H_q=16, H_kv=8, D=128</code></dd></div>
+    </dl>
+  </header>
+
+  <section class="ivn-section" id="principle">
+    <header class="ivn-sec-head"><span class="ivn-sec-index">01</span><h2>核心原理</h2></header>
+    <p class="ivn-lead">序列切分天然适合逐位置操作。Ulysses 把注意力前后的跨卡交换做成一对互逆的维度重排。</p>
+    <div class="ivn-scroll" data-width="860" role="region" aria-label="四栏核心原理" tabindex="0">
+      <div class="ivn-grid-4">
+        <article class="ivn-card" data-tone="blue"><span class="ivn-badge" data-tone="blue">01 起点</span><h3>逐位置层独立</h3><code>Embedding / RMSNorm / MLP</code><p>每个 token 只读自己的 hidden state，因此序列切开仍然可以计算。</p></article>
+        <article class="ivn-card" data-tone="amber"><span class="ivn-badge" data-tone="amber">02 矛盾</span><h3>Attention 需要完整序列</h3><code>QKᵀ → softmax → V</code><p>每个 Query 需要同一注意力头覆盖的 Key 和 Value，直接按本地序列计算会漏读历史。</p></article>
+        <article class="ivn-card" data-tone="blue"><span class="ivn-badge" data-tone="blue">03 性质</span><h3>多头可独立计算</h3><p>单个注意力头的分数和输出按头独立。GQA 的同组 Query 头仍共享对应的 KV 头。</p></article>
+        <article class="ivn-card" data-tone="green"><span class="ivn-badge" data-tone="green">04 优化</span><h3>两次换轴保存数学结果</h3><p>进入注意力前换到完整序列和部分头，返回后恢复部分序列和全部头。</p></article>
+      </div>
     </div>
-    </div>
-    <div class="stack">
-      <p class="ivn-callout" data-tone="blue">核心思想：牺牲部分头，换取完整序列，从而保证 Attention 计算正确。</p>
-      <p class="example">例：seq 被 2 卡切成前半 / 后半；进入 Attention 前，每卡换到完整 seq，但只保留一半 heads。</p>
+    <p class="ivn-callout" data-tone="blue"><strong class="ivn-callout-tag">数学本质 ·</strong>牺牲部分本地 heads，换回这些 heads 的完整序列。以两卡为例，进入注意力前每张卡从前半或后半序列换成全序列、半数 heads。</p>
+  </section>
+
+  <section class="ivn-section" id="setup">
+    <header class="ivn-sec-head"><span class="ivn-sec-index">02</span><h2>设备网格与 CP 分组</h2></header>
+    <p class="ivn-lead">四张卡组成两个 CP 组，每组处理自己的 DP 分片。以下只跟踪 GPU0 和 GPU1，另一个 CP 组遵循同样规则。</p>
+    <div class="ivn-scroll" data-width="860" role="region" aria-label="设备网格与 CP 分组" tabindex="0">
+      <div class="ivn-grid-2">
+        <article class="ivn-card" data-tone="blue"><span class="ivn-badge" data-tone="blue">本文跟踪</span><h3>CP Group 0 · dp_rank=0</h3><div class="ivn-slots" role="group" aria-label="第零组 GPU"><span class="ivn-slot">GPU0 · cp_rank=0</span><span class="ivn-slot">↔</span><span class="ivn-slot">GPU1 · cp_rank=1</span></div><pre class="ivn-code"><code>DeviceMesh: (dp=2, cp=2)&#10;input_ids / labels / attention_mask&#10;loss_weights / position_ids: (2, 8)&#10;local sequence → (2, 4)  # shape</code></pre></article>
+        <article class="ivn-card" data-tone="blue"><span class="ivn-badge" data-tone="blue">并行对等组</span><h3>CP Group 1 · dp_rank=1</h3><div class="ivn-slots" role="group" aria-label="第一组 GPU"><span class="ivn-slot">GPU2 · cp_rank=0</span><span class="ivn-slot">↔</span><span class="ivn-slot">GPU3 · cp_rank=1</span></div><pre class="ivn-code"><code>同一 DP 分片内两卡先见到完整组输入&#10;按 CP 轴切分序列: (2, 8) → (2, 4)  # shape</code></pre></article>
+      </div>
     </div>
   </section>
-<section aria-labelledby="setup" class="ivn-section">
-    <h2 id="setup">运行示例设定</h2><div class="ivn-intro"><p>用四张卡组成两个 CP 组，并固定每组的输入形状。下面只跟踪 dp_rank=0 的两张卡，其余同级单元按同一规则执行。</p></div>
-    <div role="region" aria-label="SP 运行设定及 DP 组" class="ivn-scroll" tabindex="0">
-    <div class="grid setup ivn-module ivn-wide ivn-wide--dense">
-      <div class="ivn-card" data-tone="blue">
-        <ul class="setup-list">
-          <li><span>模型：Qwen3–0.6B</span></li>
-          <li><span>硬件：4 × GPU</span></li>
-          <li><span>并行：FSDP2, cp_size=2, dp_size=2</span></li>
-          <li><span>DeviceMesh：(dp=2, cp=2)</span></li>
-          <li><span>每个 CP 组的输入：batch_size=2, seq_len=8</span></li>
-          <li><span>下文聚焦：<strong>dp_rank=0 的 CP 组 = GPU0 + GPU1</strong></span></li>
-        </ul>
+
+  <section class="ivn-section" id="flow">
+    <header class="ivn-sec-head"><span class="ivn-sec-index">03</span><h2>主前向数据流（Stage 1–7）</h2></header>
+    <p class="ivn-lead">每个 CP Rank 先持有一段序列的所有头，再交换成完整序列的一组头。注意力完成后做逆向重排，后续逐位置层继续使用原来的序列分片。</p>
+    <div class="ivn-scroll" data-width="860" role="region" aria-label="Ulysses 前向七阶段泳道" tabindex="0">
+      <div class="ivn-swimlane-board">
+        <div class="ivn-lane-headers"><span>GPU 0 · cp_rank=0</span><span>算子与通信契约</span><span>GPU 1 · cp_rank=1</span></div>
+        <div class="ivn-stage">
+          <h3 class="ivn-stage-bar"><span class="ivn-stage-num">STAGE 1</span>序列切分</h3>
+          <div class="ivn-stage-cols">
+            <div class="ivn-lane-cell"><p><strong>GPU 0 · 取 seq[0:4]</strong></p><pre class="ivn-code"><code>input → first_half  # shape (2, 8) → (2, 4)</code></pre><p>拿到前半序列的全部头。</p></div>
+            <div class="ivn-lane-mid"><code>padding_and_split_data</code><p>同一 CP 组在切分前看到相同样本。序列轴按 2 等分。</p></div>
+            <div class="ivn-lane-cell"><p><strong>GPU 1 · 取 seq[4:8]</strong></p><pre class="ivn-code"><code>input → second_half  # shape (2, 8) → (2, 4)</code></pre><p>拿到后半序列的全部头。</p></div>
+          </div>
+        </div>
+        <div class="ivn-stage">
+          <h3 class="ivn-stage-bar"><span class="ivn-stage-num">STAGE 2</span>逐位置层独立前向</h3>
+          <div class="ivn-stage-cols">
+            <div class="ivn-lane-cell"><p><strong>保留前半序列</strong></p><pre class="ivn-code"><code>Embedding(input_ids)  # shape (2, 4) → (2, 4, 1024)&#10;RMSNorm / MLP  # shape (2, 4, 1024) → (2, 4, 1024)</code></pre><p>例如 token3 的 MLP 输出只依赖它自己的 hidden state。</p></div>
+            <div class="ivn-lane-mid"><code>per-token forward</code><p>不同序列位置在这些算子中独立，本阶段没有 CP 换轴。</p></div>
+            <div class="ivn-lane-cell"><p><strong>保留后半序列</strong></p><pre class="ivn-code"><code>Embedding(input_ids)  # shape (2, 4) → (2, 4, 1024)&#10;RMSNorm / MLP  # shape (2, 4, 1024) → (2, 4, 1024)</code></pre><p>token4 由本卡独立处理。</p></div>
+          </div>
+        </div>
+        <div class="ivn-stage">
+          <h3 class="ivn-stage-bar"><span class="ivn-stage-num">STAGE 3</span>QKV 投影形状</h3>
+          <div class="ivn-stage-cols">
+            <div class="ivn-lane-cell"><p><strong>GPU 0 · 前半序列</strong></p><pre class="ivn-code"><code>Q: (2, 4, 16, 128)&#10;K: (2, 4, 8, 128)&#10;V: (2, 4, 8, 128)&#10;# shape order: B, S, H, D</code></pre><p>Q 有 16 个头，K/V 各有 8 个。</p></div>
+            <div class="ivn-lane-mid"><code>q_proj / k_proj / v_proj</code><p>GQA 固定 num_attention_heads=16、num_key_value_heads=8、head_dim=128。</p></div>
+            <div class="ivn-lane-cell"><p><strong>GPU 1 · 后半序列</strong></p><pre class="ivn-code"><code>Q: (2, 4, 16, 128)&#10;K: (2, 4, 8, 128)&#10;V: (2, 4, 8, 128)&#10;# shape order: B, S, H, D</code></pre><p>各持有对应 token 的全部 Q/K/V 头。</p></div>
+          </div>
+        </div>
+        <div class="ivn-stage" data-phase="comm">
+          <h3 class="ivn-stage-bar"><span class="ivn-stage-num">STAGE 4</span>第一次 All-to-All</h3>
+          <div class="ivn-stage-cols">
+            <div class="ivn-lane-cell"><p><strong>GPU 0 · 完整序列的第 0 组头</strong></p><pre class="ivn-code"><code>Q′: (2, 8, 8, 128)&#10;K′: (2, 8, 4, 128)&#10;V′: (2, 8, 4, 128)&#10;# shape: (2, 4, H, 128) → (2, 8, H/2, 128)</code></pre><p>计算覆盖 seq[0:8]，Q heads 0–7，KV heads 0–3。</p></div>
+            <div class="ivn-lane-mid"><span class="ivn-comm-pill">↔ All-to-All</span><p>scatter 头维 / gather 序列维。每卡向对端发送 2×4×(16+8+8)×128÷2 = 16,384 元素，同量接收。</p></div>
+            <div class="ivn-lane-cell"><p><strong>GPU 1 · 完整序列的第 1 组头</strong></p><pre class="ivn-code"><code>Q′: (2, 8, 8, 128)&#10;K′: (2, 8, 4, 128)&#10;V′: (2, 8, 4, 128)&#10;# shape: (2, 4, H, 128) → (2, 8, H/2, 128)</code></pre><p>计算覆盖 seq[0:8]，Q heads 8–15，KV heads 4–7。</p></div>
+          </div>
+        </div>
+        <div class="ivn-stage">
+          <h3 class="ivn-stage-bar"><span class="ivn-stage-num">STAGE 5</span>本地满序列 FlashAttention</h3>
+          <div class="ivn-stage-cols">
+            <div class="ivn-lane-cell"><p><strong>GPU 0 · 本地头组</strong></p><pre class="ivn-code"><code>flash_attn(Q′, K′, V′)&#10;# shape Q′ (2, 8, 8, 128) → context (2, 8, 8, 128)</code></pre><p>每个本地 head 都能访问完整序列。</p></div>
+            <div class="ivn-lane-mid"><span class="ivn-badge" data-tone="green">完整上下文</span><p>Attention(Q,K,V) = softmax(QKᵀ / √d) · V。Q/K/V 分组对应关系保持不变。</p></div>
+            <div class="ivn-lane-cell"><p><strong>GPU 1 · 本地头组</strong></p><pre class="ivn-code"><code>flash_attn(Q′, K′, V′)&#10;# shape Q′ (2, 8, 8, 128) → context (2, 8, 8, 128)</code></pre><p>得到另一个头组的完整序列 context。</p></div>
+          </div>
+        </div>
+        <div class="ivn-stage" data-phase="comm">
+          <h3 class="ivn-stage-bar"><span class="ivn-stage-num">STAGE 6</span>第二次 All-to-All</h3>
+          <div class="ivn-stage-cols">
+            <div class="ivn-lane-cell"><p><strong>GPU 0 · 恢复前半序列</strong></p><pre class="ivn-code"><code>context → All-to-All  # shape (2, 8, 8, 128) → (2, 4, 16, 128)</code></pre><p>取回前半序列的全部头。</p></div>
+            <div class="ivn-lane-mid"><span class="ivn-comm-pill">↔ All-to-All</span><p>scatter 序列维 / gather 头维。每卡向对端发送 2×8×8×128÷2 = 8,192 元素，同量接收。</p></div>
+            <div class="ivn-lane-cell"><p><strong>GPU 1 · 恢复后半序列</strong></p><pre class="ivn-code"><code>context → All-to-All  # shape (2, 8, 8, 128) → (2, 4, 16, 128)</code></pre><p>取回后半序列的全部头。</p></div>
+          </div>
+        </div>
+        <div class="ivn-stage" data-phase="out">
+          <h3 class="ivn-stage-bar"><span class="ivn-stage-num">STAGE 7</span>输出投影与残差</h3>
+          <div class="ivn-stage-cols">
+            <div class="ivn-lane-cell"><p><strong>GPU 0 · 前半序列</strong></p><pre class="ivn-code"><code>output → reshape(2, 4, 2048)  # shape (2, 4, 16, 128) → (2, 4, 2048)&#10;o_proj → (2, 4, 1024)  # shape (2, 4, 2048) → (2, 4, 1024)</code></pre><p>残差连接、MLP 和 RMSNorm 继续使用前半序列。</p></div>
+            <div class="ivn-lane-mid"><span class="ivn-badge" data-tone="green">恢复序列分片</span><p>每个 CP Rank 保有原始序列片段。下一层注意力重复相同流程。</p></div>
+            <div class="ivn-lane-cell"><p><strong>GPU 1 · 后半序列</strong></p><pre class="ivn-code"><code>output → reshape(2, 4, 2048)  # shape (2, 4, 16, 128) → (2, 4, 2048)&#10;o_proj → (2, 4, 1024)  # shape (2, 4, 2048) → (2, 4, 1024)</code></pre><p>残差连接、MLP 和 RMSNorm 继续使用后半序列。</p></div>
+          </div>
+        </div>
       </div>
-      <div class="group-card ivn-card" data-tone="blue">
-        <h3>CP 组（dp_rank=0）</h3>
-        <div class="rank-pair">
-          <div class="ivn-card" data-tone="blue"><strong>GPU0</strong> <code>(cp_rank=0)</code></div><p>↔</p>
-          <div class="ivn-card" data-tone="blue"><strong>GPU1</strong> <code>(cp_rank=1)</code></div>
-        </div>
-        <p class="group-size mono">cp_size=2</p>
-      </div>
-      <div class="group-card ivn-card" data-tone="blue">
-        <h3>CP 组（dp_rank=1）</h3>
-        <div class="rank-pair">
-          <div class="ivn-card" data-tone="blue"><strong>GPU2</strong> <code>(cp_rank=0)</code></div><p>↔</p>
-          <div class="ivn-card" data-tone="blue"><strong>GPU3</strong> <code>(cp_rank=1)</code></div>
-        </div>
-        <p class="group-size mono">cp_size=2</p>
-      </div>
-    </div>
-    </div>
-    <p class="dp-size mono">dp_size=2</p>
-  </section>
-<section aria-labelledby="flow" class="ivn-section">
-    <h2 id="flow">SP 主流程（A → G）</h2><div class="ivn-intro"><p>先看输入如何落到各 Rank 上，再看两次 All-to-All 如何交换序列维和头维。本地注意力在两次通信之间完成，输出恢复到原序列分片布局。按图中形状计算，每卡第一次对端发送 Q、K、V 共 16,384 个元素，第二次对端发送 context 的一半，共 8,192 个元素。</p></div>
-    <div role="region" aria-label="Ulysses A 到 G 主流程" class="ivn-scroll" tabindex="0">
-    <div class="flow ivn-module ivn-wide ivn-wide--dense">
-      <article class="row">
-        <div class="row-heading" data-tone="blue"><span class="badge ivn-label ivn-chip">A</span>输入与切分</div>
-        <div class="row-main">
-          <div class="grid a-top">
-            <div class="ivn-card" data-tone="blue"><strong>完整输入（同一 CP 组内各 rank 看到相同数据）</strong> input_ids / labels / attention_mask / loss_weights / position_ids<p class="center mono">shape: (2, 8)</p></div>
-            <p class="arrow-detail">padding_and_split_data<span class="arrow">⟶</span><span class="muted">（沿序列维切分）</span></p>
-            <div class="pair">
-              <div class="rank-input ivn-card" data-tone="blue"><strong>GPU0 (cp_rank=0)</strong> 取前半序列<p class="mono">shape: (2, 4)</p></div>
-              <div class="rank-input ivn-card" data-tone="blue"><strong>GPU1 (cp_rank=1)</strong> 取后半序列<p class="mono">shape: (2, 4)</p></div>
-            </div>
-          </div>
-          <p class="status">此时格式：部分序列 + 全部头</p>
-        </div>
-      </article>
-      <article class="row">
-        <div class="row-heading" data-tone="blue"><span class="badge ivn-label ivn-chip">B</span>Embedding / RMSNorm / MLP</div>
-        <div class="row-main">
-          <div class="grid two align">
-            <p class="ivn-card" data-tone="blue"><strong>这些层是 per-token 计算</strong> 序列切分下可直接独立计算</p>
-            <p class="example">例：MLP 中 token3 的输出 只依赖 token3 自己的 hidden state， 不依赖 token4。</p>
-          </div>
-        </div>
-      </article>
-      <article class="row">
-        <div class="row-heading" data-tone="blue"><span class="badge ivn-label ivn-chip">C</span>QKV 投影后</div>
-        <div class="row-main">
-          <div class="grid three align">
-            <pre class="ivn-card" data-tone="blue"><strong>GPU0: Q = (2, 4, 16, 128)</strong>
-      K = (2, 4, 8, 128)
-      V = (2, 4, 8, 128)</pre>
-            <pre class="ivn-card" data-tone="blue"><strong>GPU1: Q = (2, 4, 16, 128)</strong>
-      K = (2, 4, 8, 128)
-      V = (2, 4, 8, 128)</pre>
-            <pre class="ivn-card" data-tone="green">GQA: num_attention_heads = 16
-     num_key_value_heads = 8
-     head_dim = 128</pre>
-          </div>
-        </div>
-      </article>
-      <article class="row">
-        <div class="row-heading" data-tone="purple"><span class="badge ivn-label ivn-chip">D</span>第一次 All-to-All</div>
-        <div class="row-main">
-          <div class="grid biased">
-            <div class="transfer ivn-card" data-tone="purple">
-              <p class="transfer-label" data-tone="purple"><code>scatter_dim = 头维, gather_dim = 序列维</code>部分序列 + 全部头 → 完整序列 + 部分头</p>
-              <div class="grid two">
-                <pre class="ivn-card" data-tone="blue">GPU0: Q′ = (2, 8, 8, 128)
-      K′ = (2, 8, 4, 128)
-      V′ = (2, 8, 4, 128)</pre>
-                <pre class="ivn-card" data-tone="blue">GPU1: Q′ = (2, 8, 8, 128)
-      K′ = (2, 8, 4, 128)
-      V′ = (2, 8, 4, 128)</pre>
-              </div>
-            </div>
-            <div class="transfer-side ivn-card" data-tone="amber"><p>若 padding mask 已切分，可 All-gather：</p><p class="center mono">(2, 4) → global_mask = (2, 8)</p></div>
-          </div>
-          <p class="ivn-callout" data-tone="green">本质：每个 rank 放弃一半 heads，换回完整序列。</p>
-        </div>
-      </article>
-      <article class="row">
-        <div class="row-heading" data-tone="blue"><span class="badge ivn-label ivn-chip">E</span>本地 Flash Attention</div>
-        <div class="row-main">
-          <div class="grid biased align">
-            <div class="ivn-card" data-tone="blue"><p>每个 rank 在「完整序列 + 部分头」上执行本地 attention 每个 head 都能看到完整序列，因此与单卡数学等价</p><p class="center mono">context = (2, 8, 8, 128)</p></div>
-            <p class="example formula">Attention(Q, K, V) = softmax(QK^T / √d) · V</p>
-          </div>
-          <p class="example">例：GPU0 虽然只算 head 0–7，但这些 head 都能看到完整 seq[0:8]。</p>
-        </div>
-      </article>
-      <article class="row">
-        <div class="row-heading" data-tone="purple"><span class="badge ivn-label ivn-chip">F</span>第二次 All-to-All</div>
-        <div class="row-main">
-          <div class="grid biased">
-            <div class="transfer ivn-card" data-tone="purple">
-              <p class="transfer-label" data-tone="purple"><code>scatter_dim = 序列维, gather_dim = 头维</code>完整序列 + 部分头 → 部分序列 + 全部头</p>
-              <div class="grid two">
-                <p class="center mono ivn-card" data-tone="blue">GPU0: output = (2, 4, 16, 128)</p>
-                <p class="center mono ivn-card" data-tone="blue">GPU1: output = (2, 4, 16, 128)</p>
-              </div>
-            </div>
-            <p class="transfer-side ivn-card" data-tone="amber">把 full-seq local-head 的结果 换回模型后续层需要的格式。</p>
-          </div>
-        </div>
-      </article>
-      <article class="row">
-        <div class="row-heading" data-tone="blue"><span class="badge ivn-label ivn-chip">G</span>汇聚与后续层</div>
-        <div class="row-main">
-          <div class="last-step ivn-card" data-tone="blue"><p class="mono">output → reshape (2, 4, 2048) o_proj → (2, 4, 1024)</p><p>残差连接 + MLP + RMSNorm 下一层重复相同的 Attention 流程</p></div>
-        </div>
-      </article>
-    </div>
     </div>
   </section>
-<section aria-labelledby="flash" class="ivn-section">
-    <h2 id="flash">为什么通常要用 Flash Attention?</h2><div class="ivn-intro"><p>序列布局的变化使本地注意力看到完整序列，长序列仍会带来很大的打分矩阵。Flash Attention 用块内计算和在线归一化控制这部分存储。</p></div>
-    <div role="region" aria-label="Flash Attention 四步对照" class="ivn-scroll" tabindex="0">
-    <div class="grid four steps-four ivn-pipeline ivn-module ivn-wide ivn-wide--dense">
-      <div class="ivn-card" data-tone="blue"><h3>(1) UlySSes 改变的是分布式布局</h3><p>第一次 All-to-All 之后， 每张卡拿到的是 「完整 seq + 部分 heads」， 不是「短 seq + 全部 heads」。</p></div>
-      <div class="ivn-card" data-tone="amber"><h3>(2) 普通 attention 的问题</h3><p>若直接构造 attention scores， shape 是 [B, H, S, S]。 当 seq_len 很长时， S × S 显存会爆炸。</p><p class="inset">例：B = 1, S = 128K, heads_per_rank = 8， bf16 时，仅 scores 就约 274 GB。</p></div>
-      <div class="ivn-card" data-tone="green"><h3>(3) Flash Attention 的作用</h3><p>FA 按 block 分块计算， 在线 softmax， 不显式保存完整 S × S attention matrix， 显存从接近 O(S²) 降到更接近 O(S)。</p></div>
-      <div class="ivn-card" data-tone="blue"><h3>(4) 结论</h3><p>UlySSes 负责跨卡布局切换； Flash Attention 负责让每张卡上的 full-seq attention 算得动。 所以工程上二者几乎绑定使用。</p></div>
+
+  <section class="ivn-section" id="flash">
+    <header class="ivn-sec-head"><span class="ivn-sec-index">04</span><h2>为什么通常要搭配 FlashAttention</h2></header>
+    <p class="ivn-lead">换轴解决注意力访问完整序列的问题，单头打分依然随长度呈平方增长。FlashAttention 通过分块和在线归一化降低中间显存。</p>
+    <div class="ivn-scroll" data-width="860" role="region" aria-label="FlashAttention 四步推演" tabindex="0">
+      <div class="ivn-grid-4">
+        <article class="ivn-card" data-tone="blue"><span class="ivn-badge" data-tone="blue">01 布局</span><h3>Ulysses 管布局</h3><p>第一次交换后，每卡持有完整序列及分配到的注意力头。</p></article>
+        <article class="ivn-card" data-tone="red"><span class="ivn-badge" data-tone="red">02 显存瓶颈</span><h3>显式分数矩阵代价</h3><code>[B,H,S,S] · bf16</code><p>B=1、每卡 H=8、S=128K 时，仅分数约 274.88 GB（256 GiB）。</p></article>
+        <article class="ivn-card" data-tone="green"><span class="ivn-badge" data-tone="green">03 破局</span><h3>在线分块</h3><p>按块计算分数。在线维护 softmax 统计量，避免显式保存完整 S×S 矩阵。</p></article>
+        <article class="ivn-card" data-tone="blue"><span class="ivn-badge" data-tone="blue">04 组合</span><h3>组合效果</h3><p>Ulysses 负责跨卡切换布局，FlashAttention 负责单卡高效执行满序列的本地头计算。</p></article>
+      </div>
     </div>
-    </div>
-    <div class="stack"><p class="ivn-callout" data-tone="amber">补充：理论上也可换成 SDPA / NPU fused attention 等高效 kernel，但前提仍然是它必须支持 full-seq + local-head 的高效计算。</p></div>
+    <p class="ivn-callout" data-tone="amber"><strong class="ivn-callout-tag">工程边界 ·</strong>SDPA 或 NPU fused attention 也可承载这一路径，条件是内核支持 full-seq + local-head 的输入布局。</p>
   </section>
-<section aria-labelledby="details" class="ivn-section">
-    <h2 id="details">SP 下的关键特殊点（举例说明）</h2><div class="ivn-intro"><p>主流程之外，标签、掩码和梯度都需要检查各自的归属。依次核对跨片 Shift、全局 mask、反向通信的轴和梯度归约范围。</p></div>
-    <div role="region" aria-label="SP 的四个特殊环节" class="ivn-scroll" tabindex="0">
-    <div class="grid four details ivn-module ivn-wide ivn-wide--dense">
-      <div class="ivn-card" data-tone="blue">
-        <h3>(1) 跨分片的 Loss 标签对齐</h3>
-        <div class="grid two train-table center">
-          <div class="ivn-card" data-tone="green"><strong>GPU0</strong> <code>labels = [A, B, C]</code></div>
-          <div class="ivn-card" data-tone="green"><strong>GPU1</strong> <code>labels = [D, E, F]</code></div>
-        </div>
-        <p class="inset red">GPU0 最后一个 logits 应预测 D，但 D 在 GPU1 上，直接本地 shift 会错。</p>
-        <ol class="labels-list">
-          <li>❶ 取得完整 labels 与对应 loss_weights</li>
-          <li>❷ 全局 shift labels [..., 1:]</li>
-          <li>❸ 末尾补 −100</li>
-          <li>❹ 将对齐后的标签和权重按序列切分</li>
-        </ol>
-        <p class="mini-line center ivn-card" data-tone="green"><strong>GPU0</strong>　<code>shift_labels = [B, C, D]</code></p>
-        <p class="mini-line center ivn-card" data-tone="green"><strong>GPU1</strong>　<code>shift_labels = [E, F, -100]</code></p>
-        <p class="inset red">切分前即可完成全局 shift。若已经切分，只需补齐跨片边界的目标；最后用对齐的标签、权重与 logits 计算损失。</p>
+
+  <section class="ivn-section" id="details">
+    <header class="ivn-sec-head"><span class="ivn-sec-index">05</span><h2>训练期的四个关键工程边界</h2></header>
+    <p class="ivn-lead">训练期还要核对监督信号、掩码和梯度的归属。下面分别追踪四处最容易发生分片错位的边界。</p>
+    <div class="ivn-scroll" data-width="860" role="region" aria-label="训练期四个工程边界" tabindex="0">
+      <div class="ivn-grid-2">
+        <article class="ivn-card" data-tone="amber"><span class="ivn-badge" data-tone="amber">01 标签对齐</span><h3>跨分片 Loss Shift</h3><p>GPU0 最后一个 logits 应预测 D。若先行本地 Shift，GPU0 看不到 GPU1 的真实下一个标签。</p><p><strong>原标签</strong></p><div class="ivn-slots" role="group" aria-label="原始标签"><span class="ivn-slot">GPU0</span><span class="ivn-slot">A</span><span class="ivn-slot">B</span><span class="ivn-slot">C</span><span class="ivn-slot">GPU1</span><span class="ivn-slot">D</span><span class="ivn-slot">E</span><span class="ivn-slot">F</span></div><code>global_shift(labels[..., 1:], pad=-100) → split</code><p>完整 labels、loss_weights 与 logits 先对齐；已有分片时补齐跨片边界目标。</p><div class="ivn-slots" role="group" aria-label="全局 Shift 后的两段"><span class="ivn-slot" data-tone="green">GPU0</span><span class="ivn-slot" data-tone="green">B</span><span class="ivn-slot" data-tone="green">C</span><span class="ivn-slot" data-tone="green">D</span><span class="ivn-slot" data-tone="green">GPU1</span><span class="ivn-slot" data-tone="green">E</span><span class="ivn-slot" data-tone="green">F</span><span class="ivn-slot is-masked" data-tone="green">-100</span></div></article>
+        <article class="ivn-card" data-tone="amber"><span class="ivn-badge" data-tone="amber">02 掩码对齐</span><h3>全局 Padding Mask</h3><p>局部 (2, 4) mask 可沿序列 All-Gather 成全局 (2, 8)。已有全局 mask 时直接复用，因果约束由位置或 kernel causal 模式处理。</p><span class="ivn-badge" data-tone="purple">↔ All-Gather</span><p><strong>GPU0 局部两行</strong></p><div class="ivn-slots" role="group" aria-label="局部第一行"><span class="ivn-slot">1</span><span class="ivn-slot is-masked">0</span><span class="ivn-slot">1</span><span class="ivn-slot">1</span></div><div class="ivn-slots" role="group" aria-label="局部第二行"><span class="ivn-slot is-masked">0</span><span class="ivn-slot">1</span><span class="ivn-slot is-masked">0</span><span class="ivn-slot">1</span></div><p><strong>拼接后的全局两行</strong></p><div class="ivn-slots" role="group" aria-label="全局第一行"><span class="ivn-slot">1</span><span class="ivn-slot is-masked">0</span><span class="ivn-slot">1</span><span class="ivn-slot">1</span><span class="ivn-slot is-masked">0</span><span class="ivn-slot">1</span><span class="ivn-slot is-masked">0</span><span class="ivn-slot">1</span></div><div class="ivn-slots" role="group" aria-label="全局第二行"><span class="ivn-slot is-masked">0</span><span class="ivn-slot">1</span><span class="ivn-slot is-masked">0</span><span class="ivn-slot">1</span><span class="ivn-slot">1</span><span class="ivn-slot is-masked">0</span><span class="ivn-slot">1</span><span class="ivn-slot">1</span></div><p>1 表示有效，灰色虚线 0 表示 padding 或不可见。</p></article>
+        <article class="ivn-card" data-tone="blue"><span class="ivn-badge" data-tone="blue">03 反向映射</span><h3>Backward 交换轴转置</h3><p>前向第一次换轴 scatter 头 / gather 序列。其反向是 scatter 序列 / gather 头，梯度按逆映射返回来源 Rank。</p><span class="ivn-badge" data-tone="purple">↔ All-to-All 转置</span><pre class="ivn-code"><code>forward  # shape (2, 4, 16, 128) → (2, 8, 8, 128)&#10;backward # shape (2, 8, 8, 128) → (2, 4, 16, 128)</code></pre></article>
+        <article class="ivn-card" data-tone="blue"><span class="ivn-badge" data-tone="blue">04 归约范围</span><h3>参数分片的梯度范数平方和</h3><p>对不重叠的参数梯度分片做局部平方和，再在对应参数分片组求和。仅序列被切分不代表参数梯度不重叠。</p><div class="ivn-slots" role="group" aria-label="两个参数分片平方和"><span class="ivn-slot">分片 0: 3.2² = 10.24</span><span class="ivn-slot">分片 1: 2.8² = 7.84</span></div><span class="ivn-badge" data-tone="purple">↔ All-Reduce (SUM)</span><p class="ivn-res">√(3.2² + 2.8²) ≈ 4.25</p></article>
       </div>
-      <div class="ivn-card" data-tone="amber">
-        <h3>(2) 使用全局序列对应的 mask</h3>
-        <p>如果 padding mask 随序列切分，可在进入 attention 前通过 All-gather 拼回完整 mask；若已保留完整 mask，可以直接复用。因果约束另外由位置或 kernel 的 causal 模式处理。</p>
-        <p class="inset blue">例：本地 mask = (2, 4)， 拼成 global_mask = (2, 8)。</p>
-        <figure class="mask-demo" aria-label="GPU0 的两行四列 padding mask 与拼接后的两行八列 mask">
-          <div><span>本地（GPU0）</span><div class="mask-bitset four-bit" aria-hidden="true">
-            <i class="bit"></i><i class="bit off"></i><i class="bit"></i><i class="bit"></i>
-            <i class="bit off"></i><i class="bit"></i><i class="bit off"></i><i class="bit"></i>
-          </div></div>
-          <div><span>全局（All-gather 后）</span><div class="mask-bitset eight" aria-hidden="true">
-            <i class="bit"></i><i class="bit off"></i><i class="bit"></i><i class="bit"></i><i class="bit off"></i><i class="bit"></i><i class="bit off"></i><i class="bit"></i>
-            <i class="bit off"></i><i class="bit"></i><i class="bit off"></i><i class="bit"></i><i class="bit"></i><i class="bit off"></i><i class="bit"></i><i class="bit"></i>
-          </div></div>
-        </figure>
-        <p class="mask-key">□ 1: 有效　 ▧ 0: padding / 不可见</p>
-      </div>
-      <div class="ivn-card" data-tone="green">
-        <h3>(3) Backward 的通信方向会自动反转</h3>
-        <p>前向第一次 All-to-All 是 scatter 头 / gather 序列； 反向时对应变成 scatter 序列 / gather 头。 也就是通信的转置， 梯度沿相反路径流回。</p>
-        <p class="inset green">Forward: (2,4,16,128)→(2,8,8,128) Backward: grad 反向换回</p>
-        <div class="directions"><p>前向：头 → 序列 →</p><p>← 反向：序列 → 头</p></div>
-      </div>
-      <div class="ivn-card" data-tone="blue">
-        <h3>(4) 按参数分片汇总梯度范数</h3>
-        <p>完成梯度同步后，对互不重叠的参数梯度分片计算平方和，再跨持有这些分片的 rank 求和并开方。仅按序列切分，不能推出参数梯度也互不重叠。</p>
-        <p class="inset blue">例：两个不重叠分片的范数为 3.2 和 2.8 → 全局 = √(3.2² + 2.8²) ≈ 4.25</p>
-        <div class="grid two train-table center">
-          <div class="ivn-card" data-tone="blue"><strong>参数分片 0</strong> <code>grad_norm² = 10.24</code></div>
-          <div class="ivn-card" data-tone="blue"><strong>参数分片 1</strong> <code>grad_norm² = 7.84</code></div>
-        </div>
-        <p class="center">↓ All-Reduce(SUM)</p>
-        <p class="ivn-callout" data-tone="blue">全局 grad_norm = 4.25</p>
-      </div>
-    </div>
     </div>
   </section>
-<footer aria-labelledby="summary" class="ivn-takeaway" data-tone="green"><span class="ivn-label ivn-chip">TAKEAWAY</span><div><h2 id="summary">一句话总结</h2><p><strong>SP 的本质是：非 Attention 层保持序列切分；进入 Attention 前通过 All-to-All 把布局切换成 「完整序列 + 部分头」；在本地完成 full-seq attention 后再切回「部分序列 + 全部头」； loss 和 mask 需要与全局序列对齐；梯度范数的汇总范围由参数梯度分片方式决定。</strong></p></div></footer>
+
+  <section class="ivn-section" id="summary">
+    <header class="ivn-sec-head"><span class="ivn-sec-index">06</span><h2>方案与通信显存账本</h2></header>
+    <p class="ivn-lead">用同一组工程规模比较单层稳态前向。通信按每 Rank 发出的逻辑 payload 计数，显存列只比较分数矩阵口径。</p>
+    <div class="ivn-scroll" data-width="860" role="region" aria-label="B=1 · S=131,072 · H=32 · D=128 · P=4 · bf16；单层前向每卡发送量" tabindex="0">
+      <table class="ivn-ledger">
+        <caption>B=1 · S=131,072 · H=32 · D=128 · P=4 · bf16；单层前向每卡发送量</caption>
+        <thead><tr><th scope="col">方案</th><th scope="col">单卡激活形状（B,S,H,D）</th><th class="ivn-num-col" scope="col">分数矩阵峰值（仅分数缓冲）</th><th class="ivn-num-col" scope="col">单层跨卡逻辑发送 / Rank</th></tr></thead>
+        <tbody>
+          <tr data-tone="red"><td><span class="ivn-badge" data-tone="red">单卡满序列 MHA</span></td><td>Q/K/V: (1,131072,32,128)</td><td class="ivn-num-col">B·H·S²·2 = 1,099,511.63 MB（1,024 GiB）</td><td class="ivn-num-col">0 MB</td></tr>
+          <tr><td>Ring Attention</td><td>Q/K/V: (1,32768,32,128)；逐轮接入远端 KV 块</td><td class="ivn-num-col">每轮显式物化上界 B·H·(S/P)²·2 = 68,719.48 MB；在线分块不分配整块</td><td class="ivn-num-col">(P−1)·2·B·(S/P)·H·D·2 = 1,610.61 MB（1,536 MiB）</td></tr>
+          <tr data-tone="green"><td>Ulysses SP + FlashAttention</td><td>切分态 (1,32768,32,128) → 计算态 (1,131072,8,128)</td><td class="ivn-num-col">在线分块，无完整 BH/P×S×S 分数张量。若显式存全分数则 274,877.91 MB（256 GiB）</td><td class="ivn-num-col">(1−1/P)·(3+1)·B·(S/P)·H·D·2 = 805.31 MB（768 MiB）</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="ivn-callout" data-tone="amber"><strong class="ivn-callout-tag">计量口径 ·</strong>MB 按 10⁶ B，MiB 按 2²⁰ B。Ring 按每卡转发 P−1 轮本地 KV 分片估算，Ulysses 按两次均匀 All-to-All 只计对端份额。接收量、协议字节、工作区和反向均未折入。</p>
+  </section>
+
+  <footer class="ivn-takeaway">
+    <span class="ivn-takeaway-mark">TAKEAWAY</span>
+    <p>SP 让逐位置层保留序列切分，在注意力前把局部序列换成完整序列和部分头，再换回原布局。Loss 和 mask 按全局序列对齐，梯度跨哪些 Rank 归约由参数分片归属决定。</p>
+  </footer>
 </main>
 </body>
 </html>
