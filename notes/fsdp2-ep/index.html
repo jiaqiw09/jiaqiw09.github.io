@@ -1,205 +1,19 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>以 ep_size=2、topk=2 为例的 FSDP2 + EP 端到端数据流</title>
-<style>
-:root {
-  color-scheme: light;
-  --ink: #172a43;
-  --dim: #405974;
-  --navy: #172e50;
-  --blue: #245494;
-  --arrow: #315b8e;
-  --line: #c7d6e8;
-  --mono: "DejaVu Sans Mono", Consolas, "Noto Sans CJK SC", monospace;
-  font-family: Inter, "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-}
-* { box-sizing: border-box; }
-body { margin: 0; background: #fff; color: var(--ink); font-size: 16px; line-height: 1.43; }
-main { max-width: 1500px; padding: 14px clamp(10px, 2.1vw, 30px) 13px; margin: auto; }
-h1,h2,h3,p,pre { margin: 0; }
-h1,h2,h3 { line-height: 1.32; }
-h1 { font-size: clamp(22px, 2.5vw, 36px); letter-spacing: -.035em; text-align: center; }
-h2 { font-size: 1.09em; margin-bottom: 5px; color: var(--tone, var(--blue)); }
-h3 { font-size: 1.01em; margin-bottom: 3px; }
-code,pre,.mono { font-family: var(--mono); font-size: .86em; }
-pre { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
-code { overflow-wrap: anywhere; }
-header { background: var(--navy); color: #fff; padding: 13px 10px 15px; border-radius: 12px; margin-bottom: 10px; }
-.grid { display: grid; gap: 9px; }
-.intro { grid-template-columns: minmax(0, .97fr) minmax(0, 1.03fr); gap: 12px; }
-.intro > .card { --fill: #fff; --border: var(--line); border-radius: 12px; padding: 12px 14px; }
-.card { background: var(--fill, #fff); border: 1px solid var(--border, var(--line)); border-radius: 9px; padding: 7px 9px; min-width: 0; overflow-wrap: anywhere; }
-.r0, .r1 {
-  --fill: #f7f9fc;
-  --border: #b9cde4;
-  --tone: var(--blue);
-  --chip: #e9f1fb;
-  --chip-border: #aec4df;
-}
-.neutral { --border: #bdc9d9; }
-.emphasis { --fill: #f2f6fb; --border: #b9cde4; --tone: var(--blue); }
-.centered { text-align: center; }
-ul,ol { margin: 3px 0 0; padding-left: 1.45em; }
-.intro ul { padding-left: 1.2em; }
-.intro li + li { margin-top: 1px; }
-.intro ul li::marker { color: var(--blue); }
-.callout { border: 1px dashed #8da0b5; background: #f8fafc; border-radius: 7px; padding: 5px 8px; margin-top: 6px; }
-.callout pre { font-size: .82em; }
-.caption { color: var(--dim); font-size: .91em; }
-.rank-pair { grid-template-columns: minmax(0, 1fr) minmax(112px, .36fr) minmax(0, 1fr); align-items: stretch; margin-top: 12px; }
-.module { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 11px; }
-.rank-head { padding: 0 0 6px; text-align: center; }
-.rank-head h2 { padding: 5px 7px; margin: 0 0 4px; border-bottom: 1px solid var(--border); background: var(--chip); border-radius: 8px 8px 0 0; }
-.exchange { display: grid; align-content: center; justify-items: center; text-align: center; gap: 5px; color: var(--blue); font-weight: 750; }
-.connection {
-  position: relative;
-  display: block;
-  height: 10px;
-  color: var(--arrow);
-}
-.connection > span {
-  position: absolute;
-  inset-inline: 0;
-  top: 4px;
-  border-top: 2px solid currentColor;
-}
-.connection.points-left > span, .connection.both-ends > span { left: 4px; }
-.connection.points-right > span, .connection.both-ends > span { right: 4px; }
-.connection::before, .connection::after {
-  position: absolute;
-  top: 1px;
-  z-index: 1;
-  width: 8px;
-  height: 8px;
-}
-.connection.points-left::before, .connection.both-ends::before {
-  content: "";
-  left: 0;
-  background: currentColor;
-  clip-path: polygon(0 50%, 100% 0, 100% 100%);
-}
-.connection.points-right::after, .connection.both-ends::after {
-  content: "";
-  right: 0;
-  background: currentColor;
-  clip-path: polygon(100% 50%, 0 0, 0 100%);
-}
-.wire { width: min(90%, 220px); margin-block: 4px; }
-.wire > span { border-top-style: dashed; }
-.workflow { display: grid; margin-top: 12px; gap: 12px; }
-.stage {
-  --side: 1.33fr;
-  --center: .87fr;
-  min-width: 0;
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  overflow: hidden;
-}
-.stage-heading {
-  display: flex;
-  align-items: baseline;
-  gap: 9px;
-  margin: 0;
-  padding: 8px 12px;
-  background: #f1f5fa;
-  border-bottom: 1px solid #e0e8f1;
-  color: var(--navy);
-}
-.stage-heading .step-number { flex: 0 0 auto; font: 750 .85em var(--mono); color: var(--blue); }
-.stage-grid {
-  display: grid;
-  grid-template-columns: minmax(0, var(--side)) minmax(0, var(--center)) minmax(0, var(--side));
-  gap: clamp(7px, 1vw, 14px);
-  align-items: start;
-  padding: 10px 11px 11px;
-}
-.stage.with-connector .stage-grid {
-  --gutter: clamp(22px, 2.5vw, 36px);
-  grid-template-columns: minmax(0, var(--side)) var(--gutter) minmax(0, var(--center)) var(--gutter) minmax(0, var(--side));
-  gap: 6px;
-}
-.stage.compute { --side: .79fr; --center: 1.45fr; }
-.stage.combine { --side: .93fr; --center: 1.5fr; }
-.connector { align-self: start; justify-self: stretch; margin-top: 35px; }
-.cross-connector {
-  display: grid;
-  place-items: center;
-  justify-self: center;
-  width: 100%;
-  max-width: 34px;
-  height: 30px;
-  margin-top: 31px;
-}
-.cross-connector .connection { grid-area: 1 / 1; width: 112%; }
-.cross-connector .connection:first-child { transform: rotate(43deg); }
-.cross-connector .connection:last-child { transform: rotate(-43deg); }
-.compute .connector { margin-top: 25px; }
-.sort-arrow {
-  display: block;
-  width: 12px;
-  height: 9px;
-  margin: 4px auto;
-  background: var(--arrow);
-  clip-path: polygon(0 0, 100% 0, 50% 100%);
-}
-.down-mark { width: 13px; transform: rotate(90deg); }
-.restore-label { display: flex; align-items: flex-start; justify-content: center; gap: 5px; color: var(--blue); }
-.restore-label .down-mark { flex: 0 0 13px; margin-top: .36em; }
-.lane { min-width: 0; }
-.stage-grid > .lane > .card { padding: 9px 10px; }
-.middle:not(.emphasis) .card { border-color: #d6e0eb; }
-.middle .card p + p,.lane .card > p + p { margin-top: 3px; }
-.middle pre { margin: 4px 0; }
-.chips { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 3px; vertical-align: middle; }
-.chip { display: inline-grid; place-items: center; padding: 1px 4px; min-width: 1.5em; font-size: .91em; background: var(--chip, #e0ecff); border: 1px solid var(--chip-border, #93b8ef); border-radius: 4px; color: var(--ink); }
-.chip.remote { background: #fff; border-style: dashed; }
-.chip.expert { background: white; min-width: 2.55em; font-weight: 700; margin-inline: 3px; }
-.stack-sorted { display: grid; grid-template-columns: minmax(0, 1fr) 10px minmax(0, 1fr); gap: 4px; align-items: end; padding: 4px 0 2px; text-align: center; }
-.stack-sorted .chips { position: relative; border-top: 1px solid #92a5bc; padding-top: 2px; margin-bottom: 1px; }
-.stack-sorted .caption { display: block; }
-.save { width: fit-content; max-width: 100%; margin: 5px auto 0; padding: 1px 6px; border: 1px dashed #a4b7ce; background: #fff; border-radius: 7px; color: var(--blue); font-size: .9em; text-align: center; }
-.input-lists { display: grid; gap: 2px; margin: 4px 0; }
-.input-lists > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 5px; }
-.input-lists .caption { white-space: nowrap; }
-.reordered { text-align: center; border-top: 1px solid #93a5b6; padding-top: 5px; margin-top: 3px; }
-.reordered strong { color: var(--blue); }
-.expert-labels { text-align: center; word-spacing: .3em; color: var(--navy); margin-top: 2px; }
-.sequence { display: inline-block; max-width: 100%; border: 1px solid #a9bfdb; border-radius: 5px; background: #edf3fa; padding: 2px 6px; margin-top: 3px; }
-.combine-mid { grid-template-columns: minmax(0, 2.35fr) minmax(0, 1fr); gap: 6px; align-items: start; }
-.combine-mid .side-steps { padding: 5px 7px; font-size: .89em; background: #fff; }
-.side-steps b { color: var(--blue); }
-.output .card { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 6px; align-items: center; }
-.histogram { display: flex; gap: 3px; align-items: flex-end; }
-.histogram i { width: 6px; background: var(--tone); height: 9px; border-radius: 2px; }
-.histogram i:nth-child(2) { height: 17px; }
-.histogram i:nth-child(3) { height: 26px; }
-.histogram i:nth-child(4) { height: 18px; }
-.conclusion { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 8px; margin-top: 12px; padding: 11px 12px; border-radius: 12px; }
-.conclusion .trophy { font-size: 23px; line-height: 1.3; }
-.symbol { display: inline-block; filter: grayscale(1); }
-.result-steps { display: flex; flex-wrap: wrap; gap: 3px 10px; margin-top: 3px; }
-.result-steps b { display: inline-grid; min-width: 1.3em; height: 1.3em; place-items: center; margin-right: 2px; border-radius: 50%; background: var(--blue); color: white; font-size: .9em; }
-.closing { margin-top: 7px; color: var(--navy); font-weight: 750; text-align: center; }
-@media(max-width:1100px) {
-  .stage { --side: 1fr; --center: .88fr; }
-  .stage.compute { --side: .83fr; --center: 1.35fr; }
-  .stage.combine { --side: 1fr; --center: 1.25fr; }
-}
-@media print { body{background:white} main{padding:0} .stage,.intro{break-inside:avoid} }
-</style>
-  <link rel="stylesheet" href="../../assets/reader.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="FSDP2 与专家并行端到端数据流，以两个 EP Rank、topk=2 为例。">
+  <title>以 ep_size=2、topk=2 为例的 FSDP2 + EP 端到端数据流</title>
+  <link rel="stylesheet" href="../../assets/infra-visual-note.css">
 </head>
-<body class="reader-note reader-ep">
-<main>
-  <header><h1>以 ep_size=2、topk=2 为例的 FSDP2 + EP 端到端数据流</h1></header>
-  <div class="diagram-scroll" role="region" aria-label="术语与计算对照">
-  <div class="grid intro">
-    <section class="card r0">
-      <h2>前置说明 / 术语说明</h2>
+<body class="ivn ivn-ep">
+<main class="ivn-canvas">
+<header class="ivn-heading"><p class="ivn-kicker">DISTRIBUTED TRAINING / EXPERT PARALLELISM</p><h1>以 ep_size=2、topk=2 为例的 FSDP2 + EP 端到端数据流</h1><p class="ivn-deck">跟踪 token 从路由分组、跨卡派发到专家计算、返回与加权合并。</p><nav class="ivn-jump" aria-label="文章目录"><a href="#ownership"><span class="ivn-jump-index">01</span>归属与约定</a><a href="#dispatch"><span class="ivn-jump-index">02</span>路由与派发</a><a href="#experts"><span class="ivn-jump-index">03</span>本地专家</a><a href="#combine"><span class="ivn-jump-index">04</span>返还与合并</a></nav><dl class="ivn-spec" aria-label="全局设定"><div><dt>EP 拓扑</dt><dd><code>ep_size=2 · topk=2</code></dd></div><div><dt>专家编号</dt><dd>0–127</dd></div><div><dt>每卡玩具输入</dt><dd>4 个 token</dd></div><div><dt>向量形状</dt><dd><code>[hidden_size]</code></dd></div></dl></header>
+<section class="ivn-section" aria-labelledby="ownership"><h2 id="ownership">输入、专家归属与等价条件</h2><div class="ivn-intro"><p>先固定两个 EP Rank 的输入与专家编号。相同路由和专家函数下，重排和跨卡交换只改变每条记录所在位置。</p></div><div role="region" aria-label="术语与计算对照" class="ivn-scroll" tabindex="0">
+  <div class="grid intro ivn-module ivn-wide ivn-wide--dense">
+    <section class="r0 ivn-card" data-tone="blue">
+      <h3>前置说明 / 术语说明</h3>
       <ol>
         <li><strong>token</strong>：指一个 token 位置的隐藏状态向量，shape = [hidden_size]。</li>
         <li>若一个样本序列长度为 S，则 Attention 输出 shape = [S, hidden_size]，MoE 输入就是这 S 个 token 向量。</li>
@@ -207,231 +21,204 @@ ul,ol { margin: 3px 0 0; padding-left: 1.45em; }
         <li>Permute / Unpermute 操作的是这 S×topk 个向量在行维度上的重排。</li>
         <li><strong>关键前提</strong>：本例中，EP 组的两个 rank 持有不同的输入 token；AllToAll 负责把 token 发往对应 expert 所在 rank，并在计算后返还。</li>
       </ol>
-      <p class="callout"><span class="symbol" aria-hidden="true">💡</span> <strong>注：</strong>4 卡、ep_size=2 时，EP group 可为 {卡0, 卡1} 与 {卡2, 卡3}；这里仅展示一个 EP group 内两张卡如何协作完成 MoE 计算。</p>
+      <p class="ivn-callout" data-tone="amber"> <strong>注：</strong>4 卡、ep_size=2 时，EP group 可为 {卡0, 卡1} 与 {卡2, 卡3}；这里仅展示一个 EP group 内两张卡如何协作完成 MoE 计算。</p>
     </section>
-    <section class="card r0">
-      <h2>为什么 EP 不改变 MoE 的数学结果</h2>
+    <section class="r0 ivn-card" data-tone="blue">
+      <h3>为什么 EP 不改变 MoE 的数学结果</h3>
       <ul>
         <li><strong>对比条件</strong>：两种执行方式使用相同的输入、专家函数、路由结果和路由权重，保留相同的 token–expert 配对。</li>
         <li><strong>发往专家</strong>：每条记录对应一个 token 的一个 top-k 槽位。重排和第一次 AllToAll 将记录送到对应专家所在的 rank。</li>
         <li><strong>按专家计算</strong>：Grouped MatMul 批量执行各专家的矩阵乘法，配合相同的激活函数和逐元素运算，得到每条记录的专家输出。</li>
         <li><strong>返还与合并</strong>：恢复发送分段后，第二次 AllToAll 将专家输出送回输入 rank，再按原 token 和 top-k 槽位对齐权重并求和。</li>
       </ul>
-      <div class="callout"><pre>专家输出：z[i,k] = expert[top_k_index[i,k]](token[i])
+      <div class="ivn-callout" data-tone="green"><pre>专家输出：z[i,k] = expert[top_k_index[i,k]](token[i])
 合并输出：output[i] = Σₖ top_k_weights[i,k] × z[i,k]</pre><p>两种执行方式在数学上得到同一个式子。浮点实现可能因计算顺序或 kernel 不同而有舍入差异。</p></div>
     </section>
   </div>
-  </div>
-
-  <div class="diagram-scroll" role="region" aria-label="两侧 EP Rank 的输入">
-  <div class="grid rank-pair module">
-    <section class="card rank-head r0">
-      <h2>EP Rank 0（持有 Expert 0–63）</h2>
+  </div><div role="region" aria-label="两侧 EP Rank 的输入" class="ivn-scroll" tabindex="0">
+  <div class="grid rank-pair module ivn-module ivn-wide ivn-wide--dense">
+    <section class="rank-head r0 ivn-card" data-tone="blue">
+      <h3>EP Rank 0（持有 Expert 0–63）</h3>
       <p>输入 tokens: [t0, t1, t2, t3]</p><p class="caption">Rank 0 持有的输入 token</p>
       <p>top_k_index: [[0,64], [1,65], [0,64], [1,65]]</p><p class="caption">全局 expert 编号</p>
     </section>
-    <div class="exchange"><p>输入 token 不同<br>（不同 DP 分片）</p><span class="wire connection both-ends" aria-hidden="true"><span></span></span></div>
-    <section class="card rank-head r1">
-      <h2>EP Rank 1（持有 Expert 64–127）</h2>
+    <div class="exchange"><p>输入 token 不同 （不同 DP 分片）</p><span class="wire connection both-ends" aria-hidden="true"><span></span></span></div>
+    <section class="rank-head r1 ivn-card" data-tone="blue">
+      <h3>EP Rank 1（持有 Expert 64–127）</h3>
       <p>输入 tokens: [t4, t5, t6, t7]</p><p class="caption">Rank 1 持有的输入 token</p>
       <p>top_k_index: [[64,0], [65,1], [64,0], [65,1]]</p><p class="caption">全局 expert 编号</p>
     </section>
   </div>
-  </div>
-
-  <div class="diagram-scroll" role="region" aria-label="FSDP2 + EP 七步横向数据流">
-  <div class="workflow" aria-label="FSDP2 加 EP 的七步数据流">
-    <section class="stage" data-step="1" aria-labelledby="step-1">
-      <h2 class="stage-heading" id="step-1"><span class="step-number">1</span>Permute 1：按目标 rank 和 expert 分组</h2>
+  </div></section>
+<section class="ivn-section" aria-labelledby="dispatch"><h2 id="dispatch">按目标专家分组并跨卡派发</h2><div class="ivn-intro"><p>每个输入 token 展开成两个路由槽位，先按目标 Rank 和专家排序。第一次 AllToAll 按发送段把各条记录放到专家所在设备。</p></div><div class="ivn-scroll" role="region" aria-label="路由展开与跨卡派发" tabindex="0"><div class="workflow ivn-wide ivn-wide--dense" aria-label="路由展开与跨卡派发"><section class="stage ivn-module" data-step="1" aria-labelledby="step-1">
+      <h3 class="stage-heading" id="step-1"><span class="step-number ivn-label">STAGE 1</span>Permute 1：按目标 rank 和 expert 分组</h3>
       <div class="stage-grid">
-        <div class="lane r0"><div class="card">
+        <div class="lane r0"><div class="ivn-card" data-tone="blue">
           <p>Rank 0 按目标 rank 分组，组内按 expert 排序。</p>
           <p>sorted:</p>
-          <div class="stack-sorted"><div><span class="chips"><span class="chip">t0</span><span class="chip">t2</span><span class="chip">t1</span><span class="chip">t3</span></span><span class="caption">发往 Rank 0（e0, e1）</span></div><b>|</b><div><span class="chips"><span class="chip remote">t0</span><span class="chip remote">t2</span><span class="chip remote">t1</span><span class="chip remote">t3</span></span><span class="caption">发往 Rank 1（e64, e65）</span></div></div>
+          <div class="stack-sorted"><div><span class="chips"><span class="chip ivn-slot">t0</span><span class="chip ivn-slot">t2</span><span class="chip ivn-slot">t1</span><span class="chip ivn-slot">t3</span></span><span class="caption">发往 Rank 0（e0, e1）</span></div><b>|</b><div><span class="chips"><span class="chip remote ivn-slot">t0</span><span class="chip remote ivn-slot">t2</span><span class="chip remote ivn-slot">t1</span><span class="chip remote ivn-slot">t3</span></span><span class="caption">发往 Rank 1（e64, e65）</span></div></div>
           <p>每个输入 token 在两段中各出现一次，对应它的两个路由槽位。</p>
           <div class="save">保存 unpermute_indices1（用于最后恢复）</div>
         </div></div>
-        <div class="lane middle neutral"><div class="card">
+        <div class="lane middle neutral"><div class="ivn-card" data-tone="blue">
           <pre>permute(tokens, top_k_index)</pre>
           <p><strong>做什么：</strong>按路由展开 token，按目标 rank 拼接发送段，再按 expert 排序。</p>
           <p><strong>为什么：</strong>先统计每个目标 rank 的发送量和每个来源 rank 的接收量，分别得到 input_splits 和 output_splits。本例两者都是 [4, 4]。</p>
         </div></div>
-        <div class="lane r1"><div class="card">
+        <div class="lane r1"><div class="ivn-card" data-tone="blue">
           <p>Rank 1 同样按目标 Rank 0 → 1 拼接发送段。</p>
           <p>sorted:</p>
-          <div class="stack-sorted"><div><span class="chips"><span class="chip remote">t4</span><span class="chip remote">t6</span><span class="chip remote">t5</span><span class="chip remote">t7</span></span><span class="caption">发往 Rank 0（e0, e1）</span></div><b>|</b><div><span class="chips"><span class="chip">t4</span><span class="chip">t6</span><span class="chip">t5</span><span class="chip">t7</span></span><span class="caption">发往 Rank 1（e64, e65）</span></div></div>
+          <div class="stack-sorted"><div><span class="chips"><span class="chip remote ivn-slot">t4</span><span class="chip remote ivn-slot">t6</span><span class="chip remote ivn-slot">t5</span><span class="chip remote ivn-slot">t7</span></span><span class="caption">发往 Rank 0（e0, e1）</span></div><b>|</b><div><span class="chips"><span class="chip ivn-slot">t4</span><span class="chip ivn-slot">t6</span><span class="chip ivn-slot">t5</span><span class="chip ivn-slot">t7</span></span><span class="caption">发往 Rank 1（e64, e65）</span></div></div>
           <p>Rank 0 段发给对端，Rank 1 段留在本卡。</p>
           <div class="save">保存 unpermute_indices1（用于最后恢复）</div>
         </div></div>
       </div>
-    </section>
-
-    <section class="stage with-connector" data-step="2" aria-labelledby="step-2">
-      <h2 class="stage-heading" id="step-2"><span class="step-number">2</span>AllToAll：跨 EP rank 交换 token</h2>
+    </section><section class="stage with-connector ivn-module" data-step="2" data-phase="communication" aria-labelledby="step-2">
+      <h3 class="stage-heading" id="step-2"><span class="step-number ivn-label">STAGE 2</span>AllToAll：跨 EP rank 交换 token</h3>
       <div class="stage-grid">
-        <div class="lane r0"><div class="card">
-          <p>Rank 0 发出 → Rank 1：卡0数据中路由到 Expert 64、65 的 token<br>Rank 0 收到 ← Rank 1：卡1数据中路由到 Expert 0、1 的 token</p>
+        <div class="lane r0"><div class="ivn-card" data-tone="blue">
+          <p>Rank 0 发出 → Rank 1：卡0数据中路由到 Expert 64、65 的 token Rank 0 收到 ← Rank 1：卡1数据中路由到 Expert 0、1 的 token</p>
           <p>现在 Rank 0 汇集了所有 EP rank 中需要 Expert 0、1 处理的 token。</p>
         </div></div>
         <div class="connector cross-connector" aria-hidden="true"><span class="connection both-ends"><span></span></span><span class="connection both-ends"><span></span></span></div>
-        <div class="lane middle neutral"><div class="card">
+        <div class="lane middle neutral"><div class="ivn-card" data-tone="purple">
           <pre>all_to_all(ep_group, tokens,
     output_splits, input_splits)</pre>
           <p><strong>做什么：</strong>将需要远端 expert 计算的 token 发给对应 rank，同时接收其他 rank 发来的、需要本地 expert 计算的 token。</p>
         </div></div>
         <div class="connector cross-connector" aria-hidden="true"><span class="connection both-ends"><span></span></span><span class="connection both-ends"><span></span></span></div>
-        <div class="lane r1"><div class="card">
-          <p>Rank 1 发出 → Rank 0：卡1数据中路由到 Expert 0、1 的 token<br>Rank 1 收到 ← Rank 0：卡0数据中路由到 Expert 64、65 的 token</p>
+        <div class="lane r1"><div class="ivn-card" data-tone="blue">
+          <p>Rank 1 发出 → Rank 0：卡1数据中路由到 Expert 0、1 的 token Rank 1 收到 ← Rank 0：卡0数据中路由到 Expert 64、65 的 token</p>
           <p>现在 Rank 1 汇集了所有 EP rank 中需要 Expert 64、65 处理的 token。</p>
         </div></div>
       </div>
-    </section>
-
-    <section class="stage" data-step="3" aria-labelledby="step-3">
-      <h2 class="stage-heading" id="step-3"><span class="step-number">3</span>Permute 2：按本 rank 的 expert 重排</h2>
+    </section></div></div></section>
+<section class="ivn-section" aria-labelledby="experts"><h2 id="experts">在专家所在 Rank 完成计算</h2><div class="ivn-intro"><p>同一专家的 token 从不同来源 Rank 到达，先把它们重排成连续区间。各 Rank 再用本地专家权重做 Grouped MatMul。</p></div><div class="ivn-scroll" role="region" aria-label="本地专家重排与计算" tabindex="0"><div class="workflow ivn-wide ivn-wide--dense" aria-label="本地专家重排与计算"><section class="stage ivn-module" data-step="3" aria-labelledby="step-3">
+      <h3 class="stage-heading" id="step-3"><span class="step-number ivn-label">STAGE 3</span>Permute 2：按本 rank 的 expert 重排</h3>
       <div class="stage-grid">
-        <div class="lane r0"><div class="card">
+        <div class="lane r0"><div class="ivn-card" data-tone="blue">
           <p>Rank 0 AllToAll 后（混杂在一起）：</p>
           <div class="input-lists">
-            <div><span class="caption">来自卡0:</span><span class="chips"><span class="chip">t0(→e0)</span><span class="chip">t2(→e0)</span><span class="chip remote">t1(→e1)</span><span class="chip remote">t3(→e1)</span></span></div>
-            <div><span class="caption">来自卡1:</span><span class="chips"><span class="chip">t4(→e0)</span><span class="chip">t6(→e0)</span><span class="chip remote">t5(→e1)</span><span class="chip remote">t7(→e1)</span></span></div>
+            <div><span class="caption">来自卡0:</span><span class="chips"><span class="chip ivn-slot">t0(→e0)</span><span class="chip ivn-slot">t2(→e0)</span><span class="chip remote ivn-slot">t1(→e1)</span><span class="chip remote ivn-slot">t3(→e1)</span></span></div>
+            <div><span class="caption">来自卡1:</span><span class="chips"><span class="chip ivn-slot">t4(→e0)</span><span class="chip ivn-slot">t6(→e0)</span><span class="chip remote ivn-slot">t5(→e1)</span><span class="chip remote ivn-slot">t7(→e1)</span></span></div>
           </div>
           <p class="centered">混杂在一起，同一 expert 的 token 不连续</p><span class="sort-arrow" aria-hidden="true"></span>
-          <div class="reordered"><strong>Rank 0 Permute 2 后：</strong> <span class="chips"><span>[</span><span class="chip">t0</span><span class="chip">t2</span><span class="chip">t4</span><span class="chip">t6</span><span>|</span><span class="chip remote">t1</span><span class="chip remote">t3</span><span class="chip remote">t5</span><span class="chip remote">t7</span><span>]</span></span></div>
+          <div class="reordered"><strong>Rank 0 Permute 2 后：</strong> <span class="chips"><span>[</span><span class="chip ivn-slot">t0</span><span class="chip ivn-slot">t2</span><span class="chip ivn-slot">t4</span><span class="chip ivn-slot">t6</span><span>|</span><span class="chip remote ivn-slot">t1</span><span class="chip remote ivn-slot">t3</span><span class="chip remote ivn-slot">t5</span><span class="chip remote ivn-slot">t7</span><span>]</span></span></div>
           <p class="expert-labels mono">e0 e0 e0 e0　 e1 e1 e1 e1</p>
           <p>同一 expert 的 token 连续，split_list = [4, 4]，可直接 grouped matmul</p>
           <div class="save">保存 unpermute_indices2（用于 combine 阶段恢复）</div>
         </div></div>
-        <div class="lane middle neutral"><div class="card">
+        <div class="lane middle neutral"><div class="ivn-card" data-tone="blue">
           <pre>permute(tokens, global_indices)</pre>
           <p><strong>做什么：</strong>将两段接收数据按本 rank 持有的 expert 重新排序。</p>
           <p><strong>为什么：</strong>AllToAll 后 token 按来源 rank 顺序拼接，同一 expert 的 token 可能分散在不同位置；Grouped MatMul 要求同一 expert 对应的所有 token 必须连续排列，才能作为一个 batch 计算。</p>
         </div></div>
-        <div class="lane r1"><div class="card">
+        <div class="lane r1"><div class="ivn-card" data-tone="blue">
           <p>Rank 1 AllToAll 后（混杂在一起）：</p>
           <div class="input-lists">
-            <div><span class="caption">来自卡0:</span><span class="chips"><span class="chip">t0(→e64)</span><span class="chip">t2(→e64)</span><span class="chip remote">t1(→e65)</span><span class="chip remote">t3(→e65)</span></span></div>
-            <div><span class="caption">来自卡1:</span><span class="chips"><span class="chip">t4(→e64)</span><span class="chip">t6(→e64)</span><span class="chip remote">t5(→e65)</span><span class="chip remote">t7(→e65)</span></span></div>
+            <div><span class="caption">来自卡0:</span><span class="chips"><span class="chip ivn-slot">t0(→e64)</span><span class="chip ivn-slot">t2(→e64)</span><span class="chip remote ivn-slot">t1(→e65)</span><span class="chip remote ivn-slot">t3(→e65)</span></span></div>
+            <div><span class="caption">来自卡1:</span><span class="chips"><span class="chip ivn-slot">t4(→e64)</span><span class="chip ivn-slot">t6(→e64)</span><span class="chip remote ivn-slot">t5(→e65)</span><span class="chip remote ivn-slot">t7(→e65)</span></span></div>
           </div>
           <p class="centered">混杂在一起，同一 expert 的 token 不连续</p><span class="sort-arrow" aria-hidden="true"></span>
-          <div class="reordered"><strong>Rank 1 Permute 2 后：</strong> <span class="chips"><span>[</span><span class="chip">t0</span><span class="chip">t2</span><span class="chip">t4</span><span class="chip">t6</span><span>|</span><span class="chip remote">t1</span><span class="chip remote">t3</span><span class="chip remote">t5</span><span class="chip remote">t7</span><span>]</span></span></div>
+          <div class="reordered"><strong>Rank 1 Permute 2 后：</strong> <span class="chips"><span>[</span><span class="chip ivn-slot">t0</span><span class="chip ivn-slot">t2</span><span class="chip ivn-slot">t4</span><span class="chip ivn-slot">t6</span><span>|</span><span class="chip remote ivn-slot">t1</span><span class="chip remote ivn-slot">t3</span><span class="chip remote ivn-slot">t5</span><span class="chip remote ivn-slot">t7</span><span>]</span></span></div>
           <p class="expert-labels mono">e64 e64 e64 e64　 e65 e65 e65 e65</p>
           <p>同一 expert 的 token 连续，split_list = [4, 4]，可直接 grouped matmul</p>
           <div class="save">保存 unpermute_indices2（用于 combine 阶段恢复）</div>
         </div></div>
       </div>
-    </section>
-
-    <section class="stage compute with-connector" data-step="4" aria-labelledby="step-4">
-      <h2 class="stage-heading" id="step-4"><span class="step-number">4</span>Expert Computation</h2>
+    </section><section class="stage compute with-connector ivn-module" data-step="4" aria-labelledby="step-4">
+      <h3 class="stage-heading" id="step-4"><span class="step-number ivn-label">STAGE 4</span>Expert Computation</h3>
       <div class="stage-grid">
-        <div class="lane r0"><div class="card centered"><p>Rank 0 只计算 Expert 0、1</p><p><span class="chip expert">e0</span><span class="chip expert">e1</span></p></div></div>
+        <div class="lane r0"><div class="centered ivn-card" data-tone="blue"><p>Rank 0 只计算 Expert 0、1</p><p><span class="chip expert ivn-slot">e0</span><span class="chip expert ivn-slot">e1</span></p></div></div>
         <div class="connector" aria-hidden="true"><span class="connection points-right"><span></span></span></div>
         <div class="lane middle neutral"><div>
-          <div class="card">
+          <div class="ivn-card" data-tone="green">
             <pre>grouped_matmul(hidden_states, split_list, gate_up_weights)
     act_fn(gate) * up
 grouped_matmul(act, split_list, down_weights)</pre>
           </div>
-          <p class="callout"><span class="symbol" aria-hidden="true">💡</span> 此时每个 rank 处理的 token 来自所有 EP rank，但只使用自己持有的 expert 权重进行计算。</p>
+          <p class="ivn-callout" data-tone="amber"> 此时每个 rank 处理的 token 来自所有 EP rank，但只使用自己持有的 expert 权重进行计算。</p>
         </div></div>
         <div class="connector" aria-hidden="true"><span class="connection points-left"><span></span></span></div>
-        <div class="lane r1"><div class="card centered"><p>Rank 1 只计算 Expert 64、65</p><p><span class="chip expert">e64</span><span class="chip expert">e65</span></p></div></div>
+        <div class="lane r1"><div class="centered ivn-card" data-tone="blue"><p>Rank 1 只计算 Expert 64、65</p><p><span class="chip expert ivn-slot">e64</span><span class="chip expert ivn-slot">e65</span></p></div></div>
       </div>
-    </section>
-
-    <section class="stage" data-step="5" aria-labelledby="step-5">
-      <h2 class="stage-heading" id="step-5"><span class="step-number">5</span>Unpermute 1：恢复 AllToAll 后的顺序</h2>
+    </section></div></div></section>
+<section class="ivn-section" aria-labelledby="combine"><h2 id="combine">返还专家结果并恢复 token 顺序</h2><div class="ivn-intro"><p>先恢复按来源 Rank 分段的布局，再互换发送和接收分段把结果返还。原始 Rank 依据槽位索引和路由权重得到完整的 token 输出。每轮 AllToAll 每卡向对端发送 4 个向量并接收 4 个，按隐藏宽度 H 计算，各方向为 4H 个逻辑元素。</p></div><div class="ivn-scroll" role="region" aria-label="撤销重排、跨卡返还与合并" tabindex="0"><div class="workflow ivn-wide ivn-wide--dense" aria-label="撤销重排、跨卡返还与合并"><section class="stage ivn-module" data-step="5" aria-labelledby="step-5">
+      <h3 class="stage-heading" id="step-5"><span class="step-number ivn-label">STAGE 5</span>Unpermute 1：恢复 AllToAll 后的顺序</h3>
       <div class="stage-grid">
-        <div class="lane r0"><div class="card">
+        <div class="lane r0"><div class="ivn-card" data-tone="blue">
           <p>按 expert 聚类 (Permute 2 后)：</p>
-          <p class="centered"><span class="chips"><span>[</span><span class="chip">t0</span><span class="chip">t2</span><span class="chip">t4</span><span class="chip">t6</span><span>|</span><span class="chip">t1</span><span class="chip">t3</span><span class="chip">t5</span><span class="chip">t7</span><span>]</span></span></p>
+          <p class="centered"><span class="chips"><span>[</span><span class="chip ivn-slot">t0</span><span class="chip ivn-slot">t2</span><span class="chip ivn-slot">t4</span><span class="chip ivn-slot">t6</span><span>|</span><span class="chip ivn-slot">t1</span><span class="chip ivn-slot">t3</span><span class="chip ivn-slot">t5</span><span class="chip ivn-slot">t7</span><span>]</span></span></p>
           <p class="restore-label"><span class="connection points-right down-mark" aria-hidden="true"><span></span></span><strong>unpermute_indices2</strong></p>
           <p>撤销排序后（按原来源 Rank 0 → 1 分段）：</p>
           <p class="centered"><span class="sequence">[t0, t2, t1, t3 | t4, t6, t5, t7]</span></p>
         </div></div>
-        <div class="lane middle neutral"><div class="card">
+        <div class="lane middle neutral"><div class="ivn-card" data-tone="blue">
           <pre>unpermute(expert_outputs,
 unpermute_indices2)</pre>
           <p><strong>做什么：</strong>撤销 Permute 2 的排序，恢复到 AllToAll 后的顺序。</p>
           <p><strong>为什么：</strong>返还阶段的 AllToAll 要求发送方和接收方的 split 顺序一致；Permute 2 打乱了这个顺序，必须先恢复。</p>
         </div></div>
-        <div class="lane r1"><div class="card">
+        <div class="lane r1"><div class="ivn-card" data-tone="blue">
           <p>按 expert 聚类 (Permute 2 后)：</p>
-          <p class="centered"><span class="chips"><span>[</span><span class="chip">t0</span><span class="chip">t2</span><span class="chip">t4</span><span class="chip">t6</span><span>|</span><span class="chip">t1</span><span class="chip">t3</span><span class="chip">t5</span><span class="chip">t7</span><span>]</span></span></p>
+          <p class="centered"><span class="chips"><span>[</span><span class="chip ivn-slot">t0</span><span class="chip ivn-slot">t2</span><span class="chip ivn-slot">t4</span><span class="chip ivn-slot">t6</span><span>|</span><span class="chip ivn-slot">t1</span><span class="chip ivn-slot">t3</span><span class="chip ivn-slot">t5</span><span class="chip ivn-slot">t7</span><span>]</span></span></p>
           <p class="restore-label"><span class="connection points-right down-mark" aria-hidden="true"><span></span></span><strong>unpermute_indices2</strong></p>
           <p>撤销排序后（按原来源 Rank 0 → 1 分段）：</p>
           <p class="centered"><span class="sequence">[t0, t2, t1, t3 | t4, t6, t5, t7]</span></p>
         </div></div>
       </div>
-    </section>
-
-    <section class="stage with-connector" data-step="6" aria-labelledby="step-6">
-      <h2 class="stage-heading" id="step-6"><span class="step-number">6</span>AllToAll：跨 EP rank 返还专家输出</h2>
+    </section><section class="stage with-connector ivn-module" data-step="6" data-phase="communication" aria-labelledby="step-6">
+      <h3 class="stage-heading" id="step-6"><span class="step-number ivn-label">STAGE 6</span>AllToAll：跨 EP rank 返还专家输出</h3>
       <div class="stage-grid">
-        <div class="lane r0"><div class="card">
-          <p>Rank 0 发出 → Rank 1：Expert 0、1 对 t4–t7 的输出<br>Rank 0 收到 ← Rank 1：Expert 64、65 对 t0–t3 的输出</p>
+        <div class="lane r0"><div class="ivn-card" data-tone="blue">
+          <p>Rank 0 发出 → Rank 1：Expert 0、1 对 t4–t7 的输出 Rank 0 收到 ← Rank 1：Expert 64、65 对 t0–t3 的输出</p>
           <p>返还给原始持有该 token 的 rank。</p>
         </div></div>
         <div class="connector cross-connector" aria-hidden="true"><span class="connection both-ends"><span></span></span><span class="connection both-ends"><span></span></span></div>
-        <div class="lane middle neutral"><div class="card">
+        <div class="lane middle neutral"><div class="ivn-card" data-tone="purple">
           <pre>all_to_all(ep_group, expert_outputs,
     input_splits, output_splits)</pre>
           <p><strong>做什么：</strong>将 expert 计算完的 token 返还给原始 rank。</p>
         </div></div>
         <div class="connector cross-connector" aria-hidden="true"><span class="connection both-ends"><span></span></span><span class="connection both-ends"><span></span></span></div>
-        <div class="lane r1"><div class="card">
-          <p>Rank 1 发出 → Rank 0：Expert 64、65 对 t0–t3 的输出<br>Rank 1 收到 ← Rank 0：Expert 0、1 对 t4–t7 的输出</p>
+        <div class="lane r1"><div class="ivn-card" data-tone="blue">
+          <p>Rank 1 发出 → Rank 0：Expert 64、65 对 t0–t3 的输出 Rank 1 收到 ← Rank 0：Expert 0、1 对 t4–t7 的输出</p>
           <p>返还给原始持有该 token 的 rank。</p>
         </div></div>
       </div>
-    </section>
-
-    <section class="stage combine" data-step="7" aria-labelledby="step-7">
-      <h2 class="stage-heading" id="step-7"><span class="step-number">7</span>Unpermute 2：恢复原始顺序 + 加权求和</h2>
+    </section><section class="stage combine ivn-module" data-step="7" aria-labelledby="step-7">
+      <h3 class="stage-heading" id="step-7"><span class="step-number ivn-label">STAGE 7</span>Unpermute 2：恢复原始顺序 + 加权求和</h3>
       <div class="stage-grid">
-        <div class="lane r0"><div class="card">
+        <div class="lane r0"><div class="ivn-card" data-tone="blue">
           <p>AllToAll 返回后（两段分别来自 Expert 0、1 与 64、65）：</p>
           <p class="centered"><span class="sequence">[t0, t2, t1, t3 | t0, t2, t1, t3]</span></p>
           <p class="restore-label"><span class="connection points-right down-mark" aria-hidden="true"><span></span></span><strong>unpermute_indices1 + top_k_weights</strong></p>
-          <p>恢复原始 token 顺序：<span class="chips"><span>[</span><span class="chip">t0</span><span class="chip">t1</span><span class="chip">t2</span><span class="chip">t3</span><span>]</span></span><br>并对同一 token 的 topk 输出加权求和</p>
+          <p>恢复原始 token 顺序：<span class="chips"><span>[</span><span class="chip ivn-slot">t0</span><span class="chip ivn-slot">t1</span><span class="chip ivn-slot">t2</span><span class="chip ivn-slot">t3</span><span>]</span></span> 并对同一 token 的 topk 输出加权求和</p>
         </div></div>
         <div class="lane middle emphasis"><div class="grid combine-mid">
-          <div class="card">
+          <div class="ivn-card" data-tone="green">
             <pre>unpermute(expert_outputs, unpermute_indices1,
 top_k_weights)</pre>
             <p><strong>做什么：</strong>撤销 Permute 1 的排序，按原 token 和 top-k 槽位对齐专家输出。</p>
             <p><strong>为什么：</strong>需要恢复到原始的 [t0, t1, t2, ...] 顺序，才能把同一 token 的 topk 个 expert 输出正确对齐后，乘以 top_k_weights 并求和。</p>
           </div>
-          <div class="card side-steps"><p><b>①</b> 恢复原始 token 顺序</p><p><b>②</b> 乘以路由权重 top_k_weights</p><p><b>③</b> 对同一 token 的 topk 个 expert 输出求和</p></div>
+          <div class="side-steps ivn-card" data-tone="green"><p><b>①</b> 恢复原始 token 顺序</p><p><b>②</b> 乘以路由权重 top_k_weights</p><p><b>③</b> 对同一 token 的 topk 个 expert 输出求和</p></div>
         </div></div>
-        <div class="lane r1"><div class="card">
+        <div class="lane r1"><div class="ivn-card" data-tone="blue">
           <p>AllToAll 返回后（两段分别来自 Expert 0、1 与 64、65）：</p>
           <p class="centered"><span class="sequence">[t4, t6, t5, t7 | t4, t6, t5, t7]</span></p>
           <p class="restore-label"><span class="connection points-right down-mark" aria-hidden="true"><span></span></span><strong>unpermute_indices1 + top_k_weights</strong></p>
-          <p>恢复原始 token 顺序：<span class="chips"><span>[</span><span class="chip">t4</span><span class="chip">t5</span><span class="chip">t6</span><span class="chip">t7</span><span>]</span></span><br>并对同一 token 的 topk 输出加权求和</p>
+          <p>恢复原始 token 顺序：<span class="chips"><span>[</span><span class="chip ivn-slot">t4</span><span class="chip ivn-slot">t5</span><span class="chip ivn-slot">t6</span><span class="chip ivn-slot">t7</span><span>]</span></span> 并对同一 token 的 topk 输出加权求和</p>
         </div></div>
       </div>
-    </section>
-  </div>
-  </div>
-
-  <div class="diagram-scroll" role="region" aria-label="两侧 EP Rank 的输出">
-  <div class="grid rank-pair module output">
-    <div class="card r0"><span class="histogram" aria-hidden="true"><i></i><i></i><i></i><i></i></span><p><strong>输出：[num_tokens, hidden_size]</strong><br>每个 rank 拿回自己输入 token 对应的完整 expert 输出。</p></div>
+    </section></div></div><div role="region" aria-label="两侧 EP Rank 的输出" class="ivn-scroll" tabindex="0">
+  <div class="grid rank-pair module output ivn-module ivn-wide ivn-wide--dense">
+    <div class="r0 ivn-card" data-tone="blue"><span class="histogram" aria-hidden="true"><i></i><i></i><i></i><i></i></span><p><strong>输出：[num_tokens, hidden_size]</strong> 每个 rank 拿回自己输入 token 对应的完整 expert 输出。</p></div>
     <div class="exchange"><p>完成加权求和后的最终结果</p><span class="wire connection both-ends" aria-hidden="true"><span></span></span></div>
-    <div class="card r1"><span class="histogram" aria-hidden="true"><i></i><i></i><i></i><i></i></span><p><strong>输出：[num_tokens, hidden_size]</strong><br>每个 rank 拿回自己输入 token 对应的完整 expert 输出。</p></div>
+    <div class="r1 ivn-card" data-tone="blue"><span class="histogram" aria-hidden="true"><i></i><i></i><i></i><i></i></span><p><strong>输出：[num_tokens, hidden_size]</strong> 每个 rank 拿回自己输入 token 对应的完整 expert 输出。</p></div>
   </div>
-  </div>
-  <section class="card emphasis conclusion">
-    <span class="trophy symbol" aria-hidden="true">🏆</span>
-    <div>
-      <h2>最终结论</h2>
-      <p><strong>Permute + AllToAll + Permute + Expert Compute + Unpermute + AllToAll + Unpermute 的整体流程，本质上只是：</strong></p>
-      <div class="result-steps"><span><b>1</b> 把 token 送到对应 expert 所在 rank；</span><span><b>2</b> 让同一 expert 的 token 连续排列以便 GMM 计算；</span><span><b>3</b> 计算后再按相反顺序还原；</span><span><b>4</b> 在相同路由与专家函数下，得到与无 EP 相同的数学结果。</span></div>
-    </div>
-  </section>
-  <p class="closing">★ 通信只改变 token 的位置，Permute 只改变顺序，GMM 只改变执行方式，在相同路由和专家函数下，MoE 的加权求和公式保持一致。</p>
+  </div></section>
+<footer class="ivn-takeaway" data-tone="green" aria-label="要点"><span class="ivn-label ivn-chip">TAKEAWAY</span><div><h2>最终结论</h2><p><strong>Permute + AllToAll + Permute + Expert Compute + Unpermute + AllToAll + Unpermute 的整体流程，本质上只是：</strong></p><div class="result-steps"><span><b>1</b> 把 token 送到对应 expert 所在 rank；</span><span><b>2</b> 让同一 expert 的 token 连续排列以便 GMM 计算；</span><span><b>3</b> 计算后再按相反顺序还原；</span><span><b>4</b> 在相同路由与专家函数下，得到与无 EP 相同的数学结果。</span></div><p class="closing">通信只改变 token 的位置，Permute 只改变顺序，GMM 只改变执行方式，在相同路由和专家函数下，MoE 的加权求和公式保持一致。</p></div></footer>
 </main>
 </body>
 </html>

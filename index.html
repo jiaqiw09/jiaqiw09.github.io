@@ -24,7 +24,7 @@
           <details class="branch" open>
             <summary>注意力</summary>
             <ul class="branch">
-              <li><a href="./notes/attention-from-matrices/" data-chapter="attention-from-matrices" target="chapter-content">从矩阵到注意力</a></li>
+              <li><a href="./notes/attention-from-matrices/" data-chapter="attention-from-matrices" target="chapter-content" aria-current="page">从矩阵到注意力</a></li>
             </ul>
           </details>
         </details>
@@ -33,7 +33,7 @@
           <details class="branch" open>
             <summary>多卡互联</summary>
             <ul class="branch">
-              <li><a href="./notes/gpu-rdma/" data-chapter="gpu-rdma" target="chapter-content" aria-current="page">GPU 多卡互联与 RDMA</a></li>
+              <li><a href="./notes/gpu-rdma/" data-chapter="gpu-rdma" target="chapter-content">GPU 多卡互联与 RDMA</a></li>
             </ul>
           </details>
         </details>
@@ -50,7 +50,7 @@
       </nav>
     </details>
     <main class="reader-pane" aria-label="文件内容">
-      <iframe src="./notes/gpu-rdma/" name="chapter-content" title="GPU 多卡互联与 RDMA"></iframe>
+      <iframe src="./notes/attention-from-matrices/index.html" name="chapter-content" title="从矩阵到注意力"></iframe>
     </main>
   </div>
   <script>
@@ -58,7 +58,8 @@
     const frame = document.querySelector('iframe[name="chapter-content"]');
     const sidebar = document.querySelector(".reader-sidebar");
     const compact = matchMedia("(max-width: 890px)");
-    let displayedUrl = frame.src;
+    let displayedChapter = "attention-from-matrices";
+    let resetScroll = false;
     const resize = new ResizeObserver(() => {
       const body = frame.contentDocument?.body;
       if (body) {
@@ -71,6 +72,10 @@
       const body = frame.contentDocument?.body;
       if (body) {
         resize.observe(body);
+      }
+      if (resetScroll) {
+        resetScroll = false;
+        requestAnimationFrame(() => window.scrollTo(0, 0));
       }
     });
 
@@ -89,9 +94,14 @@
         }
       }
       frame.title = selected.textContent.trim();
-      if (displayedUrl !== selected.href) {
-        displayedUrl = selected.href;
-        frame.contentWindow.location.replace(displayedUrl);
+      if (displayedChapter !== selected.dataset.chapter) {
+        displayedChapter = selected.dataset.chapter;
+        resetScroll = true;
+        if (location.protocol === "file:") {
+          frame.src = new URL("index.html", selected.href).href;
+        } else {
+          frame.contentWindow.location.replace(selected.href);
+        }
       }
     }
 
