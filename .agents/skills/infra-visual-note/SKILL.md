@@ -22,3 +22,18 @@ description: 用工程图解讲义风（Infra Visual Note）编写、改版和�
 - 双栏推导用 `.ivn-workbench`、`.ivn-dim-formula`、`.ivn-mat`。长公式行内使用 `.ivn-math` 和 HTML 上下标。贯通泳道必须以 `.ivn-lane-headers` 开头，每阶段只用左右设备与中轴契约三列。使用 `data-phase="comm"` 或 `data-phase="out"` 标明跨卡与输出阶段。
 - 蓝表示输入与常规归属，绿表示等价、收益和输出，琥珀表示边界与瓶颈，红表示反例，紫只表示跨设备通信。对等 Rank 保持同一浅蓝底色，靠位置、编号、文字区分。紫色阶段的自动高亮只落在阶段号和中轴，两侧保持同色。
 - 禁止页面私有类、私有选择器、额外样式表、内联样式、裸 MathML、Emoji 和手写 `<br>`。保留原有引文与技术结论。旧图拆成标准组件，保留有语义的方向、归属、次序与关系。
+
+## 外层目录登记规则
+
+- 新增笔记后，在根目录 `index.html` 的对应一级领域 `.nav-domain > ul.nav-list` 下直接追加一条。关键词覆盖常用缩写、英文术语与中文同义词，`href` 与 `data-chapter` 使用同一个 slug。
+
+  ```html
+  <li class="nav-item" data-keywords="术语 缩写 中文关键字">
+    <a class="nav-link" href="./notes/<slug>/" data-chapter="<slug>" target="chapter-content">
+      <span class="nav-title">标题</span>
+    </a>
+  </li>
+  ```
+
+- 同步更新一级块头部的 `.nav-domain-count` 和侧栏页脚的 `.reader-note-total`。目录常驻全展开，一级领域与条目直接相连。禁止使用 `<details>`、`<summary>` 或插入二级子文件夹标题。
+- 保持切换、`?chapter=<slug>` 直达和浏览器历史使用同一个 `data-chapter`，复验搜索、面包屑和窄屏抽屉。目录、搜索和面包屑放在外层阅读器。

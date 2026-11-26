@@ -11,121 +11,257 @@
 <body class="reader-home">
   <header class="reader-header">
     <div class="reader-header-inner">
+      <button class="reader-toggle" type="button" aria-controls="reader-sidebar" aria-expanded="true" aria-keyshortcuts="[">
+        <svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+          <rect x="2.5" y="3.5" width="15" height="13" rx="2" />
+          <path d="M8 3.5v13" />
+        </svg>
+        <span class="reader-toggle-label">收起目录</span>
+        <kbd aria-hidden="true">[</kbd>
+      </button>
       <a class="site-name" href="./">infra杂谈</a>
+      <p class="reader-location" aria-live="polite">
+        <span aria-hidden="true">/</span>
+        <span class="reader-location-domain">模型基础</span>
+        <span aria-hidden="true">/</span>
+        <span class="reader-location-title">从矩阵到注意力</span>
+      </p>
     </div>
   </header>
+
   <div class="reader-layout">
-    <details class="reader-sidebar" open>
-      <summary class="reader-toggle">目录</summary>
-      <nav class="catalog" aria-label="文件目录">
-        <h1>目录</h1>
-        <details open>
-          <summary>模型基础</summary>
-          <details class="branch" open>
-            <summary>注意力</summary>
-            <ul class="branch">
-              <li><a href="./notes/attention-from-matrices/" data-chapter="attention-from-matrices" target="chapter-content" aria-current="page">从矩阵到注意力</a></li>
-            </ul>
-          </details>
-        </details>
-        <details open>
-          <summary>GPU 通信</summary>
-          <details class="branch" open>
-            <summary>多卡互联</summary>
-            <ul class="branch">
-              <li><a href="./notes/gpu-rdma/" data-chapter="gpu-rdma" target="chapter-content">GPU 多卡互联与 RDMA</a></li>
-            </ul>
-          </details>
-        </details>
-        <details open>
-          <summary>分布式训练</summary>
-          <details class="branch" open>
-            <summary>并行策略</summary>
-            <ul class="branch">
-              <li><a href="./notes/ulysses-sp/" data-chapter="ulysses-sp" target="chapter-content">Ulysses 序列并行（SP）</a></li>
-              <li><a href="./notes/fsdp2-ep/" data-chapter="fsdp2-ep" target="chapter-content">FSDP2 + EP 端到端数据流</a></li>
-            </ul>
-          </details>
-        </details>
+    <aside class="reader-sidebar" id="reader-sidebar" aria-label="笔记目录">
+      <label class="reader-search">
+        <svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <circle cx="8.5" cy="8.5" r="4.7" />
+          <path d="m12 12 4 4" stroke-linecap="round" />
+        </svg>
+        <input type="search" aria-label="搜索笔记" aria-keyshortcuts="/" placeholder="搜索笔记" autocomplete="off">
+        <kbd aria-hidden="true">/</kbd>
+      </label>
+
+      <nav class="reader-domains" aria-label="笔记领域">
+        <section class="nav-domain" data-domain="模型基础">
+          <div class="nav-domain-head">
+            <span class="nav-domain-title"><span class="nav-domain-num">01</span>模型基础</span>
+            <span class="nav-domain-count">1</span>
+          </div>
+          <ul class="nav-list">
+            <li class="nav-item" data-keywords="attention mla linear softmax 矩阵 注意力">
+              <a class="nav-link" href="./notes/attention-from-matrices/" data-chapter="attention-from-matrices" target="chapter-content" aria-current="page">
+                <span class="nav-title">从矩阵到注意力</span>
+              </a>
+            </li>
+          </ul>
+        </section>
+
+        <section class="nav-domain" data-domain="GPU 通信">
+          <div class="nav-domain-head">
+            <span class="nav-domain-title"><span class="nav-domain-num">02</span>GPU 通信</span>
+            <span class="nav-domain-count">1</span>
+          </div>
+          <ul class="nav-list">
+            <li class="nav-item" data-keywords="rdma gpudirect nccl gpu pcie nvlink nvswitch 多卡互联 拓扑 网卡">
+              <a class="nav-link" href="./notes/gpu-rdma/" data-chapter="gpu-rdma" target="chapter-content">
+                <span class="nav-title">GPU 多卡互联与 RDMA</span>
+              </a>
+            </li>
+          </ul>
+        </section>
+
+        <section class="nav-domain" data-domain="分布式训练">
+          <div class="nav-domain-head">
+            <span class="nav-domain-title"><span class="nav-domain-num">03</span>分布式训练</span>
+            <span class="nav-domain-count">2</span>
+          </div>
+          <ul class="nav-list">
+            <li class="nav-item" data-keywords="ulysses sp cp all-to-all flashattention 序列并行 上下文并行">
+              <a class="nav-link" href="./notes/ulysses-sp/" data-chapter="ulysses-sp" target="chapter-content">
+                <span class="nav-title">Ulysses 序列并行（SP）</span>
+              </a>
+            </li>
+            <li class="nav-item" data-keywords="fsdp2 ep moe grouped matmul all-to-all 专家并行 路由">
+              <a class="nav-link" href="./notes/fsdp2-ep/" data-chapter="fsdp2-ep" target="chapter-content">
+                <span class="nav-title">FSDP2 + EP 端到端数据流</span>
+              </a>
+            </li>
+          </ul>
+        </section>
       </nav>
-    </details>
-    <main class="reader-pane" aria-label="文件内容">
+
+      <p class="reader-search-empty" role="status" hidden>没有匹配的笔记</p>
+      <footer class="reader-sidebar-footer">
+        <span class="reader-note-total">4 NOTES</span>
+        <span><kbd>[</kbd> 收起 · <kbd>/</kbd> 搜索</span>
+      </footer>
+    </aside>
+
+    <div class="reader-scrim" aria-hidden="true" hidden></div>
+    <main class="reader-pane" aria-label="笔记正文">
       <iframe src="./notes/attention-from-matrices/index.html" name="chapter-content" title="从矩阵到注意力"></iframe>
     </main>
   </div>
+
   <script>
-    const chapterLinks = [...document.querySelectorAll(".catalog a[data-chapter]")];
-    const frame = document.querySelector('iframe[name="chapter-content"]');
     const sidebar = document.querySelector(".reader-sidebar");
-    const compact = matchMedia("(max-width: 890px)");
-    let displayedChapter = "attention-from-matrices";
-    let resetScroll = false;
-    const resize = new ResizeObserver(() => {
-      const body = frame.contentDocument?.body;
-      if (body) {
-        frame.style.height = Math.ceil(body.getBoundingClientRect().height) + "px";
-      }
+    const toggle = document.querySelector(".reader-toggle");
+    const toggleLabel = toggle.querySelector(".reader-toggle-label");
+    const search = sidebar.querySelector('input[type="search"]');
+    const catalogue = sidebar.querySelector(".reader-domains");
+    const empty = sidebar.querySelector(".reader-search-empty");
+    const scrim = document.querySelector(".reader-scrim");
+    const pane = document.querySelector(".reader-pane");
+    const frame = pane.querySelector("iframe");
+    const locationDomain = document.querySelector(".reader-location-domain");
+    const locationTitle = document.querySelector(".reader-location-title");
+    const compact = matchMedia("(max-width: 900px)");
+    const normalize = value => value.normalize("NFKC").toLowerCase();
+    const domains = [...catalogue.querySelectorAll(".nav-domain")].map(section => {
+      const name = section.dataset.domain;
+      const items = [...section.querySelectorAll(".nav-item")].map(item => {
+        const link = item.querySelector(".nav-link");
+        const title = link.querySelector(".nav-title").textContent;
+        return { item, link, title, name, terms: normalize([name, title, item.dataset.keywords].join(" ")) };
+      });
+      return { section, items, count: section.querySelector(".nav-domain-count") };
     });
+    const chapters = domains.flatMap(domain => domain.items);
+    const chapterById = new Map(chapters.map(chapter => [chapter.link.dataset.chapter, chapter]));
+    const defaultChapter = chapters.find(chapter => chapter.link.hasAttribute("aria-current")) ?? chapters[0];
+    let displayedChapter = defaultChapter;
+    let desktopOpen = true;
+    let drawerOpen = false;
 
-    frame.addEventListener("load", () => {
-      resize.disconnect();
-      const body = frame.contentDocument?.body;
-      if (body) {
-        resize.observe(body);
-      }
-      if (resetScroll) {
-        resetScroll = false;
-        requestAnimationFrame(() => window.scrollTo(0, 0));
-      }
-    });
+    function sidebarIsOpen() {
+      return compact.matches ? drawerOpen : desktopOpen;
+    }
 
-    function syncSidebar() {
-      sidebar.open = !compact.matches;
+    function renderSidebar() {
+      const open = sidebarIsOpen();
+      const overlay = compact.matches && open;
+      if (!open && sidebar.contains(document.activeElement)) {
+        toggle.focus();
+      }
+      document.body.classList.toggle("sidebar-collapsed", !desktopOpen);
+      document.body.classList.toggle("sidebar-open", overlay);
+      sidebar.inert = !open;
+      pane.inert = overlay;
+      scrim.hidden = !overlay;
+      toggle.setAttribute("aria-expanded", String(open));
+      toggleLabel.textContent = open ? "收起目录" : "展开目录";
+    }
+
+    function setSidebar(open) {
+      if (compact.matches) {
+        drawerOpen = open;
+      } else {
+        desktopOpen = open;
+      }
+      renderSidebar();
+    }
+
+    function filterNotes() {
+      const query = normalize(search.value).trim().split(/\s+/).filter(Boolean);
+      let visible = 0;
+      for (const { section, items, count } of domains) {
+        let matches = 0;
+        for (const { item, terms } of items) {
+          const matchesAll = query.every(word => terms.includes(word));
+          item.hidden = !matchesAll;
+          matches += Number(matchesAll);
+        }
+        section.hidden = matches === 0;
+        count.textContent = matches;
+        visible += matches;
+      }
+      catalogue.hidden = visible === 0;
+      empty.hidden = visible > 0;
     }
 
     function showChapter() {
       const requested = new URLSearchParams(location.search).get("chapter");
-      const selected = chapterLinks.find(link => link.dataset.chapter === requested) ?? chapterLinks[0];
-      for (const link of chapterLinks) {
-        if (link === selected) {
-          link.setAttribute("aria-current", "page");
+      const selected = chapterById.get(requested) ?? defaultChapter;
+      for (const chapter of chapters) {
+        if (chapter === selected) {
+          chapter.link.setAttribute("aria-current", "page");
         } else {
-          link.removeAttribute("aria-current");
+          chapter.link.removeAttribute("aria-current");
         }
       }
-      frame.title = selected.textContent.trim();
-      if (displayedChapter !== selected.dataset.chapter) {
-        displayedChapter = selected.dataset.chapter;
-        resetScroll = true;
+      locationDomain.textContent = selected.name;
+      locationTitle.textContent = selected.title;
+      frame.title = selected.title;
+      if (selected !== displayedChapter) {
+        displayedChapter = selected;
         if (location.protocol === "file:") {
-          frame.src = new URL("index.html", selected.href).href;
+          frame.src = new URL("index.html", selected.link.href).href;
         } else {
-          frame.contentWindow.location.replace(selected.href);
+          frame.contentWindow.location.replace(selected.link.href);
         }
       }
     }
 
-    for (const link of chapterLinks) {
-      link.addEventListener("click", event => {
-        if (event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
-          return;
+    function handleShortcut(event) {
+      if (event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) {
+        return;
+      }
+      if (event.key === "Escape" && event.target === search) {
+        event.preventDefault();
+        search.value = "";
+        filterNotes();
+        search.blur();
+        return;
+      }
+      if (event.target.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) {
+        return;
+      }
+      if (event.key === "[" || event.key === "/") {
+        event.preventDefault();
+        if (event.repeat) return;
+        if (event.key === "[") {
+          setSidebar(!sidebarIsOpen());
+        } else {
+          setSidebar(true);
+          search.focus();
         }
+      } else if (event.key === "Escape" && compact.matches && drawerOpen) {
+        event.preventDefault();
+        setSidebar(false);
+      }
+    }
+
+    for (const { link } of chapters) {
+      link.addEventListener("click", event => {
+        if (event.button !== 0 || event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
         event.preventDefault();
         const url = new URL(location.href);
         if (url.searchParams.get("chapter") !== link.dataset.chapter) {
           url.searchParams.set("chapter", link.dataset.chapter);
           history.pushState(null, "", url);
         }
-        showChapter();
-        if (compact.matches) {
-          sidebar.open = false;
+        if (displayedChapter.link === link) {
+          frame.contentDocument?.documentElement.scrollTo(0, 0);
         }
-        window.scrollTo(0, 0);
+        showChapter();
+        if (compact.matches) setSidebar(false);
       });
     }
-    compact.addEventListener("change", syncSidebar);
+
+    toggle.addEventListener("click", () => setSidebar(!sidebarIsOpen()));
+    scrim.addEventListener("click", () => setSidebar(false));
+    search.addEventListener("input", filterNotes);
+    document.addEventListener("keydown", handleShortcut);
+    frame.addEventListener("load", () => {
+      frame.contentDocument?.addEventListener("keydown", handleShortcut);
+    });
+    compact.addEventListener("change", () => {
+      drawerOpen = false;
+      renderSidebar();
+    });
     window.addEventListener("popstate", showChapter);
-    syncSidebar();
+
+    renderSidebar();
+    filterNotes();
     showChapter();
   </script>
 </body>
