@@ -175,28 +175,6 @@ body {
 .flow-arrow { align-self: center; justify-self: center; color: var(--guide-blue); font-weight: 700; }
 .guide-footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 5px 12px; margin-top: 18px; color: var(--guide-muted); font-size: .8em; }
 
-@media screen and (max-width: 760px) {
-  .guide-nav ul { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .calc-row { grid-template-columns: minmax(0, 1fr); }
-  .operation { border-inline-end: 0; }
-}
-@media screen and (max-width: 540px) {
-  .guide-part { border-radius: 9px; }
-  .flow { grid-template-columns: minmax(0, 1fr); gap: 3px; }
-  .flow-arrow { transform: rotate(90deg); }
-  .plate .plot-table :is(td, th) { padding: 5px 3px; }
-  .merged table, .merged :is(thead, tbody) { display: block; }
-  .merged tr { display: grid; grid-template-columns: 3.4em minmax(0, 1fr); align-items: center; border-bottom: 1px solid var(--guide-blue-line); }
-  .merged tr :is(td, th) { border: 0; }
-  .merged th[scope="row"] { white-space: nowrap; align-self: start; }
-  .merged .alloccol { width: auto; }
-  .merged thead th:last-child { display: none; }
-  .merged tbody td:last-child { grid-column: 2; }
-  .merged tbody td:last-child::before { content: "缓存量 "; color: var(--guide-muted); }
-}
-@media (pointer: coarse) {
-  .print-button, .guide-nav a { min-height: 44px; }
-}
 @media print {
   body.reader-note.attention-guide { max-width: none; padding: 0; background: #fff; font-size: 10pt; line-height: 1.5; }
   .print-button, .guide-nav, .guide-footer a { display: none; }
